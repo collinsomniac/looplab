@@ -246,8 +246,12 @@ final class AppState: ObservableObject {
                 for (i, step) in steps.enumerated() {
                     queueStepIndex = i + 1
                     let t0 = Date()
+                    let specJSON = (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(step), options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                    RawLog.shared.append("[\(id) \(i + 1)/\(steps.count)] $ \(specJSON)")
                     var out: [String: Any] = ["job": id, "i": i, "op": step["op"] as? String ?? "?"]
                     if let e = await JobRunnerBridge.run(step) { out.merge(e) { a, _ in a } }
+                    let outJSON = (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(out), options: [.prettyPrinted, .sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                    RawLog.shared.append("  -> \(outJSON.prefix(4000))")
                     out["ms"] = Int(Date().timeIntervalSince(t0) * 1000)
                     out["thermal"] = DeviceProbe.thermalString()
                     sendToDesktop("/results", out)

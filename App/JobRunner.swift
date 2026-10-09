@@ -132,6 +132,17 @@ final class JobRunner: @unchecked Sendable {
                     system: step["system"] as? String).value
             }
             return last
+        case "load_draft":
+            return try await ModelHost.shared.loadDraft(step["model"] as? String ?? "qwen3-0.6b").value
+        case "unload_draft":
+            await ModelHost.shared.unloadDraft()
+            return ["draft": "unloaded"]
+        case "bench_spec":
+            return try await ModelHost.shared.benchSpec(
+                prompt: step["prompt"] as? String ?? "Write one sentence about the sea.",
+                maxTokens: step["maxTokens"] as? Int ?? 128,
+                runs: step["runs"] as? Int ?? 2,
+                numDraftTokens: step["numDraftTokens"] as? Int ?? 5).value
         case "set_loops":
             return await ModelHost.shared.setLoops(step["loops"] as? Int ?? 4).value
         case "bench_loops":
@@ -155,7 +166,8 @@ final class JobRunner: @unchecked Sendable {
                 maxTokens: step["maxTokens"] as? Int ?? 128,
                 runs: step["runs"] as? Int ?? 3,
                 cacheLimitMB: step["cacheLimitMB"] as? Int,
-                memoryLimitGB: step["memoryLimitGB"] as? Double).value
+                memoryLimitGB: step["memoryLimitGB"] as? Double,
+                kvBits: step["kvBits"] as? Int).value
         case "write_test":
             let n = step["bytes"] as? Int ?? 256 * 1024 * 1024
             let before = DeviceProbe.availableMemory()

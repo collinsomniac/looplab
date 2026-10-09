@@ -25,7 +25,13 @@ actor ModelHost {
     private(set) var lastError: String?
     private(set) var loadSeconds: Double?
     private(set) var numParams: Int?
-    private var container: ModelContainer?
+    var container: ModelContainer?
+    /// Optional smaller model used to propose tokens for speculative decoding.
+    /// When set, generation uses a quantized KV cache (e.g. 8 or 4 bits) instead of fp16.
+    var kvBitsOverride: Int?
+
+    var draftContainer: ModelContainer?
+    var draftId: String?
     private var history: [[String: Any]] = []
     var historyCount: Int { history.count }
     /// JSON-encoded so the value is Sendable across the actor boundary.
@@ -38,6 +44,9 @@ actor ModelHost {
         "ouro-1.4b-thinking": "mlx-community/Ouro-1.4B-Thinking-4bit",
         "ouro-2.6b": "mlx-community/Ouro-2.6B-4bit",
         "qwen3-0.6b": "mlx-community/Qwen3-0.6B-4bit",
+        "qwen3-1.7b": "mlx-community/Qwen3-1.7B-4bit",
+        "qwen3-4b": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        "qwen2.5-coder-1.5b": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
         "llama3.2-1b": "mlx-community/Llama-3.2-1B-Instruct-4bit",
         "gemma3-1b": "mlx-community/gemma-3-1b-it-qat-4bit",
     ]
@@ -121,12 +130,15 @@ actor ModelHost {
     /// Decode throughput of the *loaded* model: N runs of the same prompt, reporting per-run tok/s,
     /// TTFT and thermal, plus min/median/max. This is the number to compare against published results.
     func benchDecode(prompt: String, maxTokens: Int = 128, runs: Int = 3,
-                     cacheLimitMB: Int? = nil, memoryLimitGB: Double? = nil) async throws -> JSONBox {
+                     cacheLimitMB: Int? = nil, memoryLimitGB: Double? = nil,
+                     kvBits: Int? = nil) async throws -> JSONBox {
         // apply memory policy knobs so the same model can be measured under different settings
         if let c = cacheLimitMB { Memory.cacheLimit = c * 1024 * 1024 }
         if let g = memoryLimitGB { Memory.memoryLimit = Int(g * 1_073_741_824) }
+        kvBitsOverride = kvBits
         let limits = ["cacheLimit": Memory.cacheLimit, "memoryLimit": Memory.memoryLimit,
-                      "recommendedWorkingSet": GPU.maxRecommendedWorkingSetBytes() ?? 0]
+                      "recommendedWorkingSet": GPU.maxRecommendedWorkingSetBytes() ?? 0,
+                      "kvBits": kvBits as Any]
         var per: [[String: Any]] = []
         for i in 0..<max(1, runs) {
             let r = try await generate(prompt: prompt, maxTokens: maxTokens, temperature: 0).value
@@ -172,7 +184,11 @@ actor ModelHost {
         chat.append(.user(prompt))
         let input = try await c.prepare(input: UserInput(chat: chat))
         let promptTokens = input.text.tokens.size
-        let params = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
+        var params = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
+        if let kv = kvBitsOverride {
+            params.kvBits = kv
+            params.quantizedKVStart = 0
+        }
         let t0 = Date()
         let stream = try await c.generate(input: input, parameters: params)
         var text = ""
