@@ -132,6 +132,23 @@ final class JobRunner: @unchecked Sendable {
                     system: step["system"] as? String).value
             }
             return last
+        case "set_loops":
+            return await ModelHost.shared.setLoops(step["loops"] as? Int ?? 4).value
+        case "bench_loops":
+            // same prompt at each loop count: shows what recurrence buys and what it costs
+            var out: [[String: Any]] = []
+            let counts = step["counts"] as? [Int] ?? [1, 2, 3, 4]
+            let prompt = step["prompt"] as? String ?? "Write one sentence about the sea."
+            let maxTokens = step["maxTokens"] as? Int ?? 128
+            for n in counts {
+                _ = await ModelHost.shared.setLoops(n)
+                let r = try await ModelHost.shared.benchDecode(
+                    prompt: prompt, maxTokens: maxTokens, runs: step["runs"] as? Int ?? 2).value
+                var row = r
+                row["loops"] = n
+                out.append(row)
+            }
+            return ["results": out, "model": await ModelHost.shared.status().value["model"] ?? "?"]
         case "bench_decode":
             return try await ModelHost.shared.benchDecode(
                 prompt: step["prompt"] as? String ?? "Write one sentence about the sea.",

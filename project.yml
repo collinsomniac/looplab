@@ -6,8 +6,9 @@ options:
   createIntermediateGroups: true
 packages:
   mlx-swift-lm:
-    url: https://github.com/ml-explore/mlx-swift-lm
-    minorVersion: 3.32.3
+    # fork: adds Ouro (looped LM) support on top of 3.32.3
+    url: https://github.com/collinsomniac/mlx-swift-lm
+    branch: ouro-3.32.3
   mlx-swift:
     url: https://github.com/ml-explore/mlx-swift
     minorVersion: 0.32.3

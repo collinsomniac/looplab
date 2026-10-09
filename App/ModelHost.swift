@@ -32,12 +32,14 @@ actor ModelHost {
     func historyJSON() -> Data { (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(history))) ?? Data("[]".utf8) }
 
     /// Curated starting points. Any other repo id works too.
+    /// Every id here was checked to exist on the Hub. Ouro entries are the looped models.
     static let presets: [String: String] = [
-        "nanbeige-3b": "mlx-community/Nanbeige4.2-3B-4bit",
+        "ouro-1.4b": "mlx-community/Ouro-1.4B-4bit",
+        "ouro-1.4b-thinking": "mlx-community/Ouro-1.4B-Thinking-4bit",
+        "ouro-2.6b": "mlx-community/Ouro-2.6B-4bit",
         "qwen3-0.6b": "mlx-community/Qwen3-0.6B-4bit",
-        "qwen3-1.7b": "mlx-community/Qwen3-1.7B-4bit",
-        "gemma3-1b": "mlx-community/gemma-3-1b-it-qat-4bit",
         "llama3.2-1b": "mlx-community/Llama-3.2-1B-Instruct-4bit",
+        "gemma3-1b": "mlx-community/gemma-3-1b-it-qat-4bit",
     ]
 
     func status() -> JSONBox { JSONBox(statusDict()) }
@@ -95,13 +97,26 @@ actor ModelHost {
             return status()
         } catch {
             state = .failed
-            lastError = "\(error)"
+            let msg = "\(error)"
+            lastError = msg.contains("401") || msg.contains("Invalid username")
+                ? "\(id) could not be downloaded (does it exist?). Hub said: \(msg)"
+                : msg
             Log.shared.add("load failed \(id): \(error)")
             throw error
         }
     }
 
     func setProgress(_ p: Double) { progress = p }
+
+    /// How many times the looped stack is applied for the loaded model (no-op for non-looped models).
+    @discardableResult
+    func setLoops(_ n: Int) -> JSONBox {
+        guard let c = container else { return JSONBox(["error": "no model loaded"]) }
+        c.perform { context in
+            if let ouro = context.model as? OuroModel { ouro.setLoopCount(n) }
+        }
+        return JSONBox(["loops": n, "model": modelId ?? "?"])
+    }
 
     /// Decode throughput of the *loaded* model: N runs of the same prompt, reporting per-run tok/s,
     /// TTFT and thermal, plus min/median/max. This is the number to compare against published results.
