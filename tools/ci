@@ -2,16 +2,26 @@
 # ci — wait for the latest GitHub Actions run of a repo; on failure print the failing step and error lines.
 #   ci <owner/repo> [wait_seconds]
 R=${1:-collinsomniac/looplab}; W=${2:-1500}
+[ -z "$CI_SHA" ] && [ -d .git ] && CI_SHA=$(git rev-parse --short HEAD 2>/dev/null); export CI_SHA
 python3 - "$R" "$W" <<'PY'
 import json, os, sys, time, urllib.request, re
 repo, wait = sys.argv[1], int(sys.argv[2])
+sha = os.environ.get("CI_SHA", "")
 tok = os.environ.get("GITHUB_TOKEN", "")
+class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
+    # GitHub log downloads redirect to blob storage, which rejects the GitHub Authorization header
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and "api.github.com" not in newurl:
+            new.headers.pop("Authorization", None); new.unredirected_hdrs.pop("Authorization", None)
+        return new
+opener = urllib.request.build_opener(NoAuthRedirect)
 def api(path, raw=False):
     req = urllib.request.Request(f"https://api.github.com/repos/{repo}/{path}",
                                  headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"})
     for attempt in range(4):
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with opener.open(req, timeout=60) as r:
                 data = r.read()
                 return data.decode("utf-8", "replace") if raw else json.loads(data)
         except Exception as e:
@@ -22,6 +32,9 @@ while True:
     runs = api("actions/runs?per_page=1")["workflow_runs"]
     if not runs: print("no runs"); sys.exit(2)
     r = runs[0]
+    if sha and not r["head_sha"].startswith(sha):
+        if t >= wait: print("run for", sha, "never appeared"); sys.exit(2)
+        time.sleep(15); t += 15; continue
     if r["status"] == "completed": break
     if t >= wait: print(f"still {r['status']} after {wait}s (run {r['id']})"); sys.exit(2)
     time.sleep(30); t += 30

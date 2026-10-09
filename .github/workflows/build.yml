@@ -20,6 +20,9 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          # Xcode 27 ships the Metal compiler as a separate component; MLX compiles .metal sources
+          xcodebuild -downloadComponent MetalToolchain || xcodebuild -downloadComponent metalToolchain
+          xcrun -sdk iphoneos metal --version || true
       - name: Cache SwiftPM
         uses: actions/cache@v4
         with:
