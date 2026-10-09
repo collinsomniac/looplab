@@ -129,9 +129,16 @@ final class JobRunner: @unchecked Sendable {
                     prompt: step["prompt"] as? String ?? "Hello",
                     maxTokens: step["maxTokens"] as? Int ?? 64,
                     temperature: Float(step["temperature"] as? Double ?? 0),
-                    system: step["system"] as? String).value
+                    system: step["system"] as? String,
+                    thinking: step["thinking"] as? Bool ?? false).value
             }
             return last
+        case "decide":
+            return try await ModelHost.shared.decide(
+                state: step["input"] as? String ?? "",
+                question: step["question"] as? String ?? "",
+                options: step["options"] as? [String] ?? ["yes", "no"],
+                instructions: step["instructions"] as? String).value
         case "load_draft":
             return try await ModelHost.shared.loadDraft(step["model"] as? String ?? "qwen3-0.6b").value
         case "unload_draft":

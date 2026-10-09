@@ -51,9 +51,11 @@ extension ModelHost {
                     main,
                     speculativeDecoding: SpeculativeDecodingConfig(
                         draftModel: draft, numDraftTokens: numDraftTokens),
-                    generateParameters: params)
+                    generateParameters: params,
+                    additionalContext: ["enable_thinking": false])
             } else {
-                session = ChatSession(main, generateParameters: params)
+                session = ChatSession(main, generateParameters: params,
+                                      additionalContext: ["enable_thinking": false])
             }
             let t0 = Date()
             var text = ""

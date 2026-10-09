@@ -47,6 +47,9 @@ actor ModelHost {
         "qwen3-1.7b": "mlx-community/Qwen3-1.7B-4bit",
         "qwen3-4b": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
         "qwen2.5-coder-1.5b": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+        "qwen3.5-0.8b": "mlx-community/Qwen3.5-0.8B-4bit",
+        "qwen3.5-2b": "mlx-community/Qwen3.5-2B-4bit",
+        "qwen3.5-4b": "mlx-community/Qwen3.5-4B-4bit",
         "llama3.2-1b": "mlx-community/Llama-3.2-1B-Instruct-4bit",
         "gemma3-1b": "mlx-community/gemma-3-1b-it-qat-4bit",
     ]
@@ -172,6 +175,7 @@ actor ModelHost {
 
     /// Generate with full measurement. Returns text + timing + memory + thermal before/after.
     func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil,
+                  thinking: Bool = false,
                   onFirstToken: (@Sendable () -> Void)? = nil,
                   onChunk: (@Sendable (String) -> Void)? = nil) async throws -> JSONBox {
         guard let c = container else { throw NSError(domain: "ModelHost", code: 2, userInfo: [NSLocalizedDescriptionKey: "no model loaded"]) }
@@ -182,7 +186,8 @@ actor ModelHost {
         var chat: [Chat.Message] = []
         if let system { chat.append(.system(system)) }
         chat.append(.user(prompt))
-        let input = try await c.prepare(input: UserInput(chat: chat))
+        // Hybrid-reasoning models (Qwen3, Qwen3.5) think by default; the template flag turns it off.
+        let input = try await c.prepare(input: UserInput(chat: chat, additionalContext: ["enable_thinking": thinking]))
         let promptTokens = input.text.tokens.size
         var params = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
         if let kv = kvBitsOverride {
