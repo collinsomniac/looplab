@@ -98,7 +98,8 @@ final class JobRunner: @unchecked Sendable {
         lock.lock(); running = nil; lock.unlock()
     }
 
-    private func execute(_ step: [String: Any]) async throws -> [String: Any] {
+    /// Exposed so the remote queue can run the same step kinds without duplicating them.
+    func execute(_ step: [String: Any]) async throws -> [String: Any] {
         switch step["op"] as? String ?? "" {
         case "probe":
             return await MainActor.run { DeviceProbe.snapshot() }

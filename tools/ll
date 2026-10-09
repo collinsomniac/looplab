@@ -1,22 +1,42 @@
 #!/bin/sh
-# ll — drive the LoopLab app from iSH/Minis over loopback.
-#   ll ping | status | device | log | models | history
-#   ll load <preset|repo-id> · ll gen "<prompt>" [maxTokens] · ll bench · ll blit · ll mbench [runs]
-# Token: export LOOPLAB_TOKEN=... (shown in the app's Control tab), or put it in ~/.looplab_token
+# ll — drive the LoopLab app. Loopback by default; set LOOPLAB_URL to the tailnet URL to use it from
+# the desktop instead (e.g. http://100.x.y.z:8765).
+#
+#   ll ping | status | device | net | models | log | routes
+#   ll load <preset|repo-id> [cacheLimitMB] · ll unload
+#   ll gen "<prompt>" [maxTokens] · ll mbench [runs]
+#   ll bench · ll blit
+#   ll job <spec.json>        # run a battery defined in a file
+#   ll quick substrate|smoke|loops
+#   ll jobs | ll results <job-id> | ll push <job-id> <url>
+#
+# Token: export LOOPLAB_TOKEN=... (app → Control tab), or ~/.looplab_token
 H=${LOOPLAB_URL:-http://127.0.0.1:8765}
 T=${LOOPLAB_TOKEN:-$(cat ~/.looplab_token 2>/dev/null)}
-get() { curl -s -m "${TMO:-30}" -H "X-Token: $T" "$H$1"; }
-post() { curl -s -m "${TMO:-900}" -H "X-Token: $T" -H "Content-Type: application/json" -d "$2" "$H$1"; }
-js() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+get()  { curl -s -m "${TMO:-30}" -H "X-Token: $T" "$H$1"; }
+post() { curl -s -m "${TMO:-1800}" -H "X-Token: $T" -H "Content-Type: application/json" -d "$2" "$H$1"; }
+j()    { python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1"; }
+spec() { cat "$1" 2>/dev/null || echo "$1"; }
+
 case "$1" in
   ping) curl -s -m 5 "$H/ping" ;;
-  status|device|log|models|history|routes) get "/$1" ;;
-  load) post /load "{\"model\": $(js "$2")}" ;;
+  status|device|models|log|net|jobs|routes) get "/$1" ;;
+  results) get "/job/results?id=$2" ;;
+  push) post /push "{\"id\": $(j "$2"), \"url\": $(j "$3")}" ;;
+  load) post /load "{\"model\": $(j "$2"), \"cacheLimitMB\": ${3:-64}}" ;;
   unload) post /unload '{}' ;;
-  gen) post /generate "{\"prompt\": $(js "$2"), \"maxTokens\": ${3:-128}}" ;;
+  gen) post /generate "{\"prompt\": $(j "$2"), \"maxTokens\": ${3:-128}}" ;;
   bench) post /bench/metal '{}' ;;
   blit) post /bench/blit '{}' ;;
   mbench) post /bench/model "{\"runs\": ${2:-3}}" ;;
-  *) sed -n 2,5p "$0" ;;
+  job) post /job "$(spec "$2")" ;;
+  quick)
+    case "$2" in
+      substrate) post /job '{"label":"substrate","steps":[{"op":"probe"},{"op":"bench_metal","batches":[1,2,4,8]},{"op":"bench_blit","mib":256},{"op":"write_test","bytes":402653184}]}' ;;
+      smoke) post /job '{"label":"smoke","steps":[{"op":"load","model":"qwen3-0.6b"},{"op":"generate","prompt":"Say hello in five words.","maxTokens":32}]}' ;;
+      loops) post /job '{"label":"loops","steps":[{"op":"generate","prompt":"Compute 17 + 26 step by step.","maxTokens":48}]}' ;;
+      *) echo "quick substrate|smoke|loops" ;;
+    esac ;;
+  *) sed -n '2,16p' "$0" ;;
 esac
 echo

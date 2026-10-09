@@ -142,6 +142,19 @@ struct JobsView: View {
                     Text("Keeps your VPN setting untouched: this listens on the Tailscale address as well as loopback.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
+                Section("Remote queue (desktop)") {
+                    TextField("Queue URL", text: Binding(get: { JobQueue.shared.base }, set: { JobQueue.shared.setBase($0) }))
+                        .autocorrectionDisabled().textInputAutocapitalization(.never).font(.caption.monospaced())
+                    TextField("Queue token (optional)", text: Binding(get: { JobQueue.shared.token }, set: { JobQueue.shared.setToken($0) }))
+                        .autocorrectionDisabled().textInputAutocapitalization(.never).font(.caption.monospaced())
+                    Button("Run queue") { JobQueue.shared.runQueue(); note = "queue started" }
+                    Button("Check desktop") {
+                        Task { let r = await JobQueue.shared.ping(); note = "\(r)" }
+                    }
+                    if !JobQueue.shared.lastReport.isEmpty { Text(JobQueue.shared.lastReport).font(.caption2).foregroundStyle(.secondary) }
+                    Text("Tap once, then leave this app on screen: the whole battery runs and results go back to the desktop as they finish.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 Section("Quick batteries") {
                     Button("Substrate: metal + blit + memory") { runQuick("substrate") }
                     Button("Model smoke test (qwen3-0.6b)") { runQuick("smoke") }
