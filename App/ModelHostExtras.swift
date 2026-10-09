@@ -3,6 +3,8 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXHuggingFace
+import HuggingFace
+import Tokenizers
 
 /// Additions to the model host: a raw command log for the terminal view, speculative decoding
 /// (lossless: the verifier's output is unchanged), and KV-cache quantization knobs.
