@@ -110,9 +110,9 @@ actor ModelHost {
 
     /// How many times the looped stack is applied for the loaded model (no-op for non-looped models).
     @discardableResult
-    func setLoops(_ n: Int) -> JSONBox {
+    func setLoops(_ n: Int) async -> JSONBox {
         guard let c = container else { return JSONBox(["error": "no model loaded"]) }
-        c.perform { context in
+        try? await c.perform { context in
             if let ouro = context.model as? OuroModel { ouro.setLoopCount(n) }
         }
         return JSONBox(["loops": n, "model": modelId ?? "?"])
