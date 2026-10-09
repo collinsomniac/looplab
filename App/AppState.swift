@@ -298,7 +298,11 @@ final class AppState: ObservableObject {
             case "metal":
                 let r = try? MetalBench.run(kernels: ["thread", "simd"], batches: [1, 2, 4, 8], reps: 25)
                 let rs = (r?["results"] as? [[String: Any]]) ?? []
-                ok = rs.allSatisfy { ($0["ok"] as? Int ?? $0["ok"] as? Bool == true ? 1 : 0) == 1 }
+                ok = rs.allSatisfy { r in
+                    if let b = r["ok"] as? Bool { return b }
+                    if let i = r["ok"] as? Int { return i != 0 }
+                    return false
+                }
                 detail = rs.map { "\($0["kernel"] ?? "") B\($0["batch"] ?? 0): \(String(format: "%.1f", $0["gbPerS"] as? Double ?? 0)) GB/s" }.joined(separator: " · ")
                 if let r { pushToDesktop(["op": "bench_metal", "results": r["results"] ?? [], "source": "tests"]) }
             case "blit":
