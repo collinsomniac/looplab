@@ -16,6 +16,12 @@ enum API {
         "POST /bench/metal {kernels?, batches?}": "native weight-streaming bench (GPU-timed, verified)",
         "POST /bench/blit {mib?}": "raw GPU copy bandwidth",
         "POST /bench/model {prompt?, maxTokens?, runs?}": "repeat generation N times, report median tok/s and thermal drift",
+        "GET /net": "interfaces + tailnet address + which hosts the control server is bound to",
+        "POST /job {label?, steps:[{op,...}], postTo?}": "run a battery of steps in one go (ops: probe, bench_metal, bench_blit, write_test, load, unload, generate, sleep, mark)",
+        "GET /jobs": "job list + which is running",
+        "GET /job/results?id=job-...": "results recorded for a job",
+        "POST /job/cancel": "stop the current job",
+        "POST /push {id,url}": "POST a finished job's results to another machine",
     ]
 
     static func handle(_ method: String, _ path: String, _ q: [String: String], _ b: [String: Any]) async -> (Int, Any) {
@@ -38,6 +44,25 @@ enum API {
                 return (200, ["lines": Log.shared.all().suffix(Int(q["n"] ?? "100") ?? 100)])
             case ("GET", "/models"):
                 return (200, ModelHost.presets)
+            case ("GET", "/net"):
+                var s = NetInfo.summary()
+                s["controlPort"] = ControlServer.shared.port
+                s["boundHosts"] = ControlServer.shared.boundHosts
+                s["running"] = ControlServer.shared.running
+                return (200, s)
+            case ("POST", "/job"):
+                return (200, JobRunner.shared.start(spec: b))
+            case ("GET", "/jobs"):
+                return (200, ["running": JobRunner.shared.isRunning(), "jobs": JobRunner.shared.list()])
+            case ("GET", "/job/results"):
+                let id = q["id"] ?? ""
+                let rows = JobRunner.shared.results(for: id)
+                return (200, ["id": id, "count": rows.count, "rows": rows])
+            case ("POST", "/job/cancel"):
+                JobRunner.shared.cancel(); return (200, ["cancelled": true])
+            case ("POST", "/push"):
+                guard let id = b["id"] as? String, let url = b["url"] as? String else { return (400, ["error": "id and url required"]) }
+                return (200, JobRunner.shared.push(id: id, to: url))
             case ("POST", "/load"):
                 let m = b["model"] as? String ?? q["model"] ?? "qwen3-0.6b"
                 let lim = b["cacheLimitMB"] as? Int ?? 64

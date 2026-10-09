@@ -8,6 +8,7 @@ final class ControlServer: @unchecked Sendable {
     static let shared = ControlServer()
     let port: UInt16 = 8765
     private var listener: NWListener?
+    private var listeners: [NWListener] = []
     private let queue = DispatchQueue(label: "looplab.control")
     private(set) var token: String = {
         if let t = UserDefaults.standard.string(forKey: "controlToken") { return t }
@@ -21,30 +22,51 @@ final class ControlServer: @unchecked Sendable {
     typealias Handler = @Sendable (_ method: String, _ path: String, _ query: [String: String], _ body: [String: Any]) async -> (Int, Any)
     var handler: Handler?
 
+    /// Listen on loopback always; on the tailnet address too when available, so a paired machine
+    /// (or a scheduled job on the desktop) can reach this API without changing the phone's VPN setting.
+    private(set) var boundHosts: [String] = []
+
     func start() {
         guard listener == nil else { return }
+        boundHosts = []
+        bind(host: "127.0.0.1")
+        if let ts = NetInfo.tailscaleIPv4() { bind(host: ts) }
+    }
+
+    private func bind(host: String) {
         do {
             let params = NWParameters.tcp
-            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!)
             params.allowLocalEndpointReuse = true
             let l = try NWListener(using: params)
             l.newConnectionHandler = { [weak self] c in self?.accept(c) }
             l.stateUpdateHandler = { [weak self] st in
+                guard let self else { return }
                 switch st {
-                case .ready: self?.running = true; Log.shared.add("control server on 127.0.0.1:\(self?.port ?? 0)")
-                case .failed(let e): self?.running = false; Log.shared.add("control server failed: \(e)"); self?.listener = nil
-                case .cancelled: self?.running = false
+                case .ready:
+                    self.running = true
+                    self.boundHosts.append(host)
+                    Log.shared.add("control server on \(host):\(self.port)")
+                case .failed(let e):
+                    Log.shared.add("control server on \(host) failed: \(e)")
+                    if host == "127.0.0.1" { self.running = false }
+                case .cancelled: break
                 default: break
                 }
             }
             l.start(queue: queue)
-            listener = l
+            listeners.append(l)
+            if listener == nil { listener = l }
         } catch {
-            Log.shared.add("control server error: \(error)")
+            Log.shared.add("control server bind \(host) error: \(error)")
         }
     }
 
-    func restart() { listener?.cancel(); listener = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.start() } }
+    func restart() {
+        listeners.forEach { $0.cancel() }
+        listeners = []; listener = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.start() }
+    }
 
     private func accept(_ c: NWConnection) {
         c.start(queue: queue)

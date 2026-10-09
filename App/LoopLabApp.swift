@@ -46,6 +46,7 @@ struct RootView: View {
         TabView {
             ChatView().tabItem { Label("Run", systemImage: "bolt") }
             DeviceView().tabItem { Label("Device", systemImage: "cpu") }
+            JobsView().tabItem { Label("Jobs", systemImage: "square.stack.3d.up") }
             ControlView().tabItem { Label("Control", systemImage: "antenna.radiowaves.left.and.right") }
         }
     }
@@ -121,6 +122,73 @@ struct DeviceView: View {
             let s = String(data: (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(r), options: [.prettyPrinted])) ?? Data(), encoding: .utf8) ?? ""
             await MainActor.run { bench = s }
         }
+    }
+}
+
+struct JobsView: View {
+    @State private var jobs: [[String: Any]] = []
+    @State private var note = ""
+    let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Reach this app") {
+                    LabeledContent("Loopback", value: "http://127.0.0.1:\(ControlServer.shared.port)")
+                    LabeledContent("Tailnet", value: NetInfo.tailscaleIPv4().map { "http://\($0):\(ControlServer.shared.port)" } ?? "no tailnet address")
+                    Button("Copy tailnet URL") {
+                        if let ts = NetInfo.tailscaleIPv4() { UIPasteboard.general.string = "http://\(ts):\(ControlServer.shared.port)" }
+                    }
+                    Text("Keeps your VPN setting untouched: this listens on the Tailscale address as well as loopback.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Section("Quick batteries") {
+                    Button("Substrate: metal + blit + memory") { runQuick("substrate") }
+                    Button("Model smoke test (qwen3-0.6b)") { runQuick("smoke") }
+                    Button("Loop-count sweep (needs a loaded model)") { runQuick("loops") }
+                }
+                if !note.isEmpty { Section("Status") { Text(note).font(.caption.monospaced()) } }
+                Section("Jobs") {
+                    ForEach(Array(jobs.enumerated()), id: \.offset) { _, j in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(j["id"] ?? "")  \(j["state"] ?? "")").font(.caption.monospaced())
+                            Text("\(j["label"] ?? "") · steps \(j["steps"] ?? 0)").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Jobs")
+            .onReceive(timer) { _ in jobs = JobRunner.shared.list() }
+            .onAppear { jobs = JobRunner.shared.list() }
+        }
+    }
+
+    func runQuick(_ kind: String) {
+        let spec: [String: Any]
+        switch kind {
+        case "substrate":
+            spec = ["label": "substrate", "steps": [
+                ["op": "probe"],
+                ["op": "bench_metal", "batches": [1, 2, 4, 8], "reps": 20],
+                ["op": "bench_blit", "mib": 256],
+                ["op": "write_test", "bytes": 402653184],
+            ]]
+        case "smoke":
+            spec = ["label": "smoke", "steps": [
+                ["op": "load", "model": "qwen3-0.6b"],
+                ["op": "generate", "prompt": "Explain what a looped transformer is in two sentences.", "maxTokens": 64],
+                ["op": "generate", "prompt": "Write a Python function that returns the nth Fibonacci number.", "maxTokens": 96],
+            ]]
+        default:
+            spec = ["label": "loops", "steps": [
+                ["op": "generate", "prompt": "Compute 17 + 26 step by step.", "maxTokens": 48],
+                ["op": "sleep", "seconds": 1],
+                ["op": "generate", "prompt": "Compute 17 + 26 step by step.", "maxTokens": 48],
+            ]]
+        }
+        let r = JobRunner.shared.start(spec: spec)
+        note = "started \(r["id"] ?? r)"
+        jobs = JobRunner.shared.list()
     }
 }
 
