@@ -51,9 +51,13 @@ jobs:
         run: |
           set -euo pipefail
           APP=$(find "$RUNNER_TEMP/LoopLab.xcarchive/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
-          rm -rf "$APP/_CodeSignature" "$APP/embedded.mobileprovision"
-          # keep the entitlements request visible to the re-signer
-          cp App/LoopLab.entitlements "$APP/LoopLab.entitlements.plist" || true
+          rm -rf "$APP/_CodeSignature" "$APP/embedded.mobileprovision" "$APP/LoopLab.entitlements.plist"
+          # Ad-hoc sign WITH entitlements: SideStore/AltStore read the requested entitlements from the
+          # binary's code signature when re-signing. An unsigned binary carries none, so
+          # increased-memory-limit would never be requested.
+          find "$APP/Frameworks" -name "*.framework" -maxdepth 1 -exec codesign -f -s - {} \; 2>/dev/null || true
+          codesign -f -s - --entitlements App/LoopLab.entitlements "$APP"
+          codesign -d --entitlements - "$APP" 2>&1 | tail -8
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           BUILD=${{ github.run_number }}
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Info.plist"
