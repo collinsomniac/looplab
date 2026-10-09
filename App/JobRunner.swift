@@ -136,7 +136,9 @@ final class JobRunner: @unchecked Sendable {
             return try await ModelHost.shared.benchDecode(
                 prompt: step["prompt"] as? String ?? "Write one sentence about the sea.",
                 maxTokens: step["maxTokens"] as? Int ?? 128,
-                runs: step["runs"] as? Int ?? 3).value
+                runs: step["runs"] as? Int ?? 3,
+                cacheLimitMB: step["cacheLimitMB"] as? Int,
+                memoryLimitGB: step["memoryLimitGB"] as? Double).value
         case "write_test":
             let n = step["bytes"] as? Int ?? 256 * 1024 * 1024
             let before = DeviceProbe.availableMemory()

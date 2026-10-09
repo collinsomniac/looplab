@@ -105,7 +105,13 @@ actor ModelHost {
 
     /// Decode throughput of the *loaded* model: N runs of the same prompt, reporting per-run tok/s,
     /// TTFT and thermal, plus min/median/max. This is the number to compare against published results.
-    func benchDecode(prompt: String, maxTokens: Int = 128, runs: Int = 3) async throws -> JSONBox {
+    func benchDecode(prompt: String, maxTokens: Int = 128, runs: Int = 3,
+                     cacheLimitMB: Int? = nil, memoryLimitGB: Double? = nil) async throws -> JSONBox {
+        // apply memory policy knobs so the same model can be measured under different settings
+        if let c = cacheLimitMB { Memory.cacheLimit = c * 1024 * 1024 }
+        if let g = memoryLimitGB { Memory.memoryLimit = Int(g * 1_073_741_824) }
+        let limits = ["cacheLimit": Memory.cacheLimit, "memoryLimit": Memory.memoryLimit,
+                      "recommendedWorkingSet": GPU.maxRecommendedWorkingSetBytes() ?? 0]
         var per: [[String: Any]] = []
         for i in 0..<max(1, runs) {
             let r = try await generate(prompt: prompt, maxTokens: maxTokens, temperature: 0).value
@@ -115,6 +121,8 @@ actor ModelHost {
                         "generatedTokens": info["generatedTokens"] ?? 0,
                         "promptTokens": info["promptTokenCount"] ?? 0,
                         "ttftMs": r["ttftMs"] ?? 0,
+                        "promptTime": info["promptTime"] ?? 0,
+                        "generateTime": info["generateTime"] ?? 0,
                         "thermal": r["thermalAfter"] ?? "?",
                         "available": r["availableAfter"] ?? 0,
                         "mlxMemory": r["mlxMemory"] ?? [:],
@@ -124,6 +132,7 @@ actor ModelHost {
         return JSONBox([
             "model": modelId ?? "?",
             "prompt": prompt,
+            "limits": limits,
             "maxTokens": maxTokens,
             "runs": per,
             "min": tps.first ?? 0,
