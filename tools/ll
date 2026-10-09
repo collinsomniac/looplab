@@ -1,0 +1,22 @@
+#!/bin/sh
+# ll — drive the LoopLab app from iSH/Minis over loopback.
+#   ll ping | status | device | log | models | history
+#   ll load <preset|repo-id> · ll gen "<prompt>" [maxTokens] · ll bench · ll blit · ll mbench [runs]
+# Token: export LOOPLAB_TOKEN=... (shown in the app's Control tab), or put it in ~/.looplab_token
+H=${LOOPLAB_URL:-http://127.0.0.1:8765}
+T=${LOOPLAB_TOKEN:-$(cat ~/.looplab_token 2>/dev/null)}
+get() { curl -s -m "${TMO:-30}" -H "X-Token: $T" "$H$1"; }
+post() { curl -s -m "${TMO:-900}" -H "X-Token: $T" -H "Content-Type: application/json" -d "$2" "$H$1"; }
+js() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+case "$1" in
+  ping) curl -s -m 5 "$H/ping" ;;
+  status|device|log|models|history|routes) get "/$1" ;;
+  load) post /load "{\"model\": $(js "$2")}" ;;
+  unload) post /unload '{}' ;;
+  gen) post /generate "{\"prompt\": $(js "$2"), \"maxTokens\": ${3:-128}}" ;;
+  bench) post /bench/metal '{}' ;;
+  blit) post /bench/blit '{}' ;;
+  mbench) post /bench/model "{\"runs\": ${2:-3}}" ;;
+  *) sed -n 2,5p "$0" ;;
+esac
+echo

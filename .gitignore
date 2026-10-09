@@ -1,0 +1,4 @@
+LoopLab.xcodeproj/
+build/
+*.ipa
+.DS_Store
