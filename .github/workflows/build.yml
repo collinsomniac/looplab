@@ -42,6 +42,13 @@ jobs:
             -archivePath "$RUNNER_TEMP/LoopLab.xcarchive" archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee "$RUNNER_TEMP/build.log" | grep -E "error:|warning: .*(deprecated|unavailable)|BUILD|ARCHIVE" | head -200
+      - name: Report MLX kernel status (NAX / Metal version)
+        if: always()
+        run: |
+          echo "--- MLX NAX / Metal lines ---"
+          grep -iE "nax|metal version|deployment target|MLX_METAL" "$RUNNER_TEMP/build.log" | sort -u | head -20 || echo "(no NAX/version lines found — kernels may have compiled silently)"
+          echo "--- toolchain ---"
+          xcrun -sdk iphoneos metal --version | head -3
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4

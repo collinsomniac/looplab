@@ -46,6 +46,8 @@ final class AppState: ObservableObject {
     @Published var streaming = ""
     @Published var generating = false
     @Published var lastTPS: Double = 0
+    @Published var liveTPS: Double = 0
+    @Published var liveTokens: Int = 0
     @Published var lastTTFT: Double = 0
     @Published var lastPromptTokens = 0
     @Published var lastGenTokens = 0
@@ -132,7 +134,7 @@ final class AppState: ObservableObject {
         generating = true
         streaming = ""
         genStart = Date()
-        lastTPS = 0; lastTTFT = 0
+        lastTPS = 0; lastTTFT = 0; liveTPS = 0; liveTokens = 0
         Task {
             do {
                 let r = try await ModelHost.shared.generate(
@@ -140,7 +142,13 @@ final class AppState: ObservableObject {
                     system: systemPrompt.isEmpty ? nil : systemPrompt, onFirstToken: { [weak self] in
                         Task { @MainActor in self?.lastTTFT = Date().timeIntervalSince(self?.genStart ?? Date()) * 1000 }
                     }, onChunk: { [weak self] piece in
-                        Task { @MainActor in self?.streaming += piece }
+                        Task { @MainActor in
+                            guard let self else { return }
+                            self.streaming += piece
+                            self.liveTokens += 1
+                            let dt = Date().timeIntervalSince(self.genStart)
+                            if dt > 0.5 { self.liveTPS = Double(self.liveTokens) / dt }
+                        }
                     }).value
                 let info = r["mlxInfo"] as? [String: Any] ?? [:]
                 lastTPS = info["tokensPerSecond"] as? Double ?? 0

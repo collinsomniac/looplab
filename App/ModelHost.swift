@@ -103,6 +103,37 @@ actor ModelHost {
 
     func setProgress(_ p: Double) { progress = p }
 
+    /// Decode throughput of the *loaded* model: N runs of the same prompt, reporting per-run tok/s,
+    /// TTFT and thermal, plus min/median/max. This is the number to compare against published results.
+    func benchDecode(prompt: String, maxTokens: Int = 128, runs: Int = 3) async throws -> JSONBox {
+        var per: [[String: Any]] = []
+        for i in 0..<max(1, runs) {
+            let r = try await generate(prompt: prompt, maxTokens: maxTokens, temperature: 0).value
+            let info = r["mlxInfo"] as? [String: Any] ?? [:]
+            per.append(["run": i,
+                        "tokensPerSecond": info["tokensPerSecond"] ?? 0,
+                        "generatedTokens": info["generatedTokens"] ?? 0,
+                        "promptTokens": info["promptTokenCount"] ?? 0,
+                        "ttftMs": r["ttftMs"] ?? 0,
+                        "thermal": r["thermalAfter"] ?? "?",
+                        "available": r["availableAfter"] ?? 0,
+                        "mlxMemory": r["mlxMemory"] ?? [:],
+                        "textSample": String((r["text"] as? String ?? "").prefix(120))])
+        }
+        let tps = per.compactMap { $0["tokensPerSecond"] as? Double }.sorted()
+        return JSONBox([
+            "model": modelId ?? "?",
+            "prompt": prompt,
+            "maxTokens": maxTokens,
+            "runs": per,
+            "min": tps.first ?? 0,
+            "median": tps.isEmpty ? 0 : tps[tps.count / 2],
+            "max": tps.last ?? 0,
+            "thermal": DeviceProbe.thermalString(),
+            "mlxMemory": Self.mlxMemory(),
+        ])
+    }
+
     /// Generate with full measurement. Returns text + timing + memory + thermal before/after.
     func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil,
                   onFirstToken: (@Sendable () -> Void)? = nil,

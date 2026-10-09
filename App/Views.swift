@@ -28,8 +28,22 @@ struct KV: View {
     }
 }
 
-func gb(_ bytes: Int) -> String { String(format: "%.2f GB", Double(bytes) / 1_073_741_824) }
-func mb(_ bytes: Int) -> String { String(format: "%.0f MB", Double(bytes) / 1_048_576) }
+/// Numbers arrive as Int / UInt64 / Double / NSNumber depending on how the probe built them;
+/// normalise before formatting (UInt64 silently failed an `as? Int` cast, which showed 0.00 GB).
+func bytes(_ any: Any?) -> Int {
+    switch any {
+    case let v as Int: return v
+    case let v as UInt64: return Int(clamping: v)
+    case let v as Int64: return Int(clamping: v)
+    case let v as UInt: return Int(clamping: v)
+    case let v as Double: return Int(v)
+    case let v as NSNumber: return v.intValue
+    default: return 0
+    }
+}
+func gb(_ b: Int) -> String { String(format: "%.2f GB", Double(b) / 1_073_741_824) }
+func mb(_ b: Int) -> String { String(format: "%.0f MB", Double(b) / 1_048_576) }
+func gbAny(_ v: Any?) -> String { gb(bytes(v)) }
 
 // MARK: - Chat
 
@@ -124,7 +138,9 @@ struct ChatView: View {
 
     private var metricsBar: some View {
         HStack(spacing: 14) {
-            Label(String(format: "%.1f tok/s", app.lastTPS), systemImage: "speedometer").font(.caption.monospaced())
+            Label(String(format: "%.1f tok/s", app.generating ? app.liveTPS : app.lastTPS), systemImage: "speedometer")
+                .font(.caption.monospaced())
+                .foregroundStyle(app.generating ? .orange : .primary)
             Label(String(format: "ttft %.0f ms", app.lastTTFT), systemImage: "timer").font(.caption.monospaced())
             Label("\(app.lastGenTokens) tok", systemImage: "text.alignleft").font(.caption.monospaced())
             Spacer()
@@ -312,19 +328,19 @@ struct DeviceView: View {
                 }
                 Section("Memory") {
                     KV(k: "available to process", v: gb(app.memoryAvailable))
-                    KV(k: "physical RAM", v: gb(app.device["physicalMemory"] as? Int ?? 0))
-                    KV(k: "phys footprint", v: mb(app.device["physFootprint"] as? Int ?? 0))
-                    KV(k: "GPU working set", v: gb(app.metalWorkingSet))
+                    KV(k: "physical RAM", v: gbAny(app.device["physicalMemory"]))
+                    KV(k: "phys footprint", v: mb(bytes(app.device["physFootprint"])))
+                    KV(k: "GPU working set", v: gbAny((app.device["metal"] as? [String: Any])?["recommendedMaxWorkingSetSize"]))
                 }
                 Section("GPU") {
                     KV(k: "device", v: app.metalName)
                     KV(k: "families", v: app.metalFamilies.joined(separator: " "))
-                    KV(k: "max buffer", v: gb(app.device["metal"].flatMap { ($0 as? [String: Any])?["maxBufferLength"] as? Int } ?? 0))
+                    KV(k: "max buffer", v: gbAny((app.device["metal"] as? [String: Any])?["maxBufferLength"]))
                 }
                 Section("CPU") {
                     if let c = app.device["cpu"] as? [String: Any] {
                         KV(k: "cores", v: "\(c["pCores"] ?? 0) P + \(c["eCores"] ?? 0) E")
-                        KV(k: "P L2 / E L2", v: "\(mb(c["pL2"] as? Int ?? 0)) / \(mb(c["eL2"] as? Int ?? 0))")
+                        KV(k: "P L2 / E L2", v: "\(mb(bytes(c["pL2"]))) / \(mb(bytes(c["eL2"])))")
                         KV(k: "cache line", v: "\(c["cacheline"] ?? 0) B")
                         KV(k: "page size", v: "\(c["pagesize"] ?? 0) B")
                     }

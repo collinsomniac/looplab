@@ -2,7 +2,7 @@ name: LoopLab
 options:
   bundleIdPrefix: io.github.collinsomniac
   deploymentTarget:
-    iOS: "18.0"
+    iOS: "26.2"   # MLX compiles its NAX (tensor-unit) kernels only for targets >= 26.2
   createIntermediateGroups: true
 packages:
   mlx-swift-lm:

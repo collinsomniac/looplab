@@ -61,9 +61,13 @@ enum MetalBench {
         var kernel: String
         var batch: Int
         var gpuMs: Double
+        var gpuMsMin: Double
+        var gpuMsMax: Double
         var gbPerS: Double
+        var gbPerSBest: Double
         var ok: Bool
         var maxRelErr: Double
+        var runs: Int
     }
 
     static func run(kernels: [String] = ["thread", "simd"], batches: [Int] = [1, 2, 4, 8], reps: Int = 20) throws -> [String: Any] {
@@ -121,7 +125,11 @@ enum MetalBench {
                         if !(err < 2e-2) { ok = false }
                     }
                 }
-                results.append(Result(kernel: kind, batch: B, gpuMs: med, gbPerS: Double(rows * cols * 2) / med / 1e6, ok: ok, maxRelErr: maxErr))
+                let best = ts.first ?? med
+                results.append(Result(kernel: kind, batch: B, gpuMs: med, gpuMsMin: best, gpuMsMax: ts.last ?? med,
+                                      gbPerS: Double(rows * cols * 2) / med / 1e6,
+                                      gbPerSBest: Double(rows * cols * 2) / best / 1e6,
+                                      ok: ok, maxRelErr: maxErr, runs: reps))
             }
         }
         let enc = try JSONEncoder().encode(results)
