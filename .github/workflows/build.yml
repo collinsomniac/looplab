@@ -58,8 +58,11 @@ jobs:
           find "$APP/Frameworks" -name "*.framework" -maxdepth 1 -exec codesign -f -s - {} \; 2>/dev/null || true
           codesign -f -s - --entitlements App/LoopLab.entitlements "$APP"
           codesign -d --entitlements - "$APP" 2>&1 | tail -8
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           BUILD=${{ github.run_number }}
+          # SideStore compares the version INSIDE the IPA with the version in the source JSON.
+          # Keep them the same string, and increase it every build so updates are detected.
+          VERSION="0.1.$BUILD"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Info.plist"
           SHORT=$(git rev-parse --short HEAD)
           NAME="LoopLab-$VERSION-$BUILD.ipa"
@@ -67,14 +70,17 @@ jobs:
           (cd "$RUNNER_TEMP/pkg" && zip -qry "$RUNNER_TEMP/$NAME" Payload)
           SIZE=$(stat -f%z "$RUNNER_TEMP/$NAME")
           TAG="build-$BUILD"
-          python3 - "$NAME" "$SIZE" "$TAG" "$VERSION.$BUILD" <<'PY'
+          python3 - "$NAME" "$SIZE" "$TAG" "$VERSION" "${{ github.sha }}" <<'PY'
           import json, sys, datetime, os
-          name, size, tag, ver = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+          name, size, tag, ver, sha = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
           repo = os.environ["GITHUB_REPOSITORY"]
           src = {"name": "LoopLab builds", "identifier": "io.github.collinsomniac.looplab.source",
                  "apps": [{"name": "LoopLab", "bundleIdentifier": "io.github.collinsomniac.looplab",
-                           "developerName": "collinsomniac", "localizedDescription": "On-device looped-LM research lab.",
-                           "iconURL": "", "versions": [{"version": ver, "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                           "developerName": "collinsomniac", "localizedDescription": "On-device looped-LM research lab: run MLX models, measure the GPU, inspect what each loop does.",
+                           "subtitle": "On-device MLX lab",
+                           "iconURL": "https://raw.githubusercontent.com/collinsomniac/looplab/main/icon.png",
+                           "versions": [{"version": ver, "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                           "localizedDescription": f"Build {tag} from {sha[:7]}.",
                            "downloadURL": f"https://github.com/{repo}/releases/download/{tag}/{name}", "size": size}]}]}
           json.dump(src, open(os.path.join(os.environ["RUNNER_TEMP"], "sidestore-source.json"), "w"), indent=2)
           PY
