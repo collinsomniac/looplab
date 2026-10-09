@@ -91,7 +91,7 @@ struct ChatView: View {
 
     func run(_ f: @escaping () async -> Void) { busy = true; Task { await f(); await refresh(); busy = false } }
     func refresh() async {
-        let s = await ModelHost.shared.status()
+        let s = await ModelHost.shared.status().value
         status = status.isEmpty ? "\(s["state"] ?? "") \(s["model"] ?? "")" : status
     }
 }

@@ -26,13 +26,14 @@ enum API {
             case ("GET", "/"), ("GET", "/routes"):
                 return (200, routes)
             case ("GET", "/status"):
-                var s = await ModelHost.shared.status()
+                var s = await ModelHost.shared.status().value
                 s["thermal"] = DeviceProbe.thermalString()
                 s["availableToProcess"] = DeviceProbe.availableMemory()
                 s["physFootprint"] = DeviceProbe.physFootprint()
                 return (200, s)
             case ("GET", "/device"):
-                return (200, await MainActor.run { DeviceProbe.snapshot() })
+                let d = await MainActor.run { () -> Data in (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(DeviceProbe.snapshot()))) ?? Data() }
+                return (200, (try? JSONSerialization.jsonObject(with: d)) ?? [:])
             case ("GET", "/log"):
                 return (200, ["lines": Log.shared.all().suffix(Int(q["n"] ?? "100") ?? 100)])
             case ("GET", "/models"):
@@ -40,18 +41,19 @@ enum API {
             case ("POST", "/load"):
                 let m = b["model"] as? String ?? q["model"] ?? "qwen3-0.6b"
                 let lim = b["cacheLimitMB"] as? Int ?? 64
-                return (200, try await ModelHost.shared.load(m, cacheLimitMB: lim))
+                return (200, try await ModelHost.shared.load(m, cacheLimitMB: lim).value)
             case ("POST", "/unload"):
                 await ModelHost.shared.unload()
-                return (200, await ModelHost.shared.status())
+                return (200, await ModelHost.shared.status().value)
             case ("POST", "/generate"):
                 guard let p = b["prompt"] as? String else { return (400, ["error": "prompt required"]) }
                 let r = try await ModelHost.shared.generate(
                     prompt: p, maxTokens: b["maxTokens"] as? Int ?? 256,
                     temperature: Float(b["temperature"] as? Double ?? 0), system: b["system"] as? String)
-                return (200, r)
+                return (200, r.value)
             case ("GET", "/history"):
-                return (200, ["records": await ModelHost.shared.history])
+                let d = await ModelHost.shared.historyJSON()
+                return (200, ["records": (try? JSONSerialization.jsonObject(with: d)) ?? []])
             case ("POST", "/bench/metal"):
                 let k = b["kernels"] as? [String] ?? ["thread", "simd"]
                 let bs = b["batches"] as? [Int] ?? [1, 2, 4, 8]
@@ -64,7 +66,7 @@ enum API {
                 var tps: [Double] = []
                 var recs: [[String: Any]] = []
                 for _ in 0..<runs {
-                    let r = try await ModelHost.shared.generate(prompt: prompt, maxTokens: b["maxTokens"] as? Int ?? 128)
+                    let r = try await ModelHost.shared.generate(prompt: prompt, maxTokens: b["maxTokens"] as? Int ?? 128).value
                     if let i = r["mlxInfo"] as? [String: Any], let t = i["tokensPerSecond"] as? Double { tps.append(t) }
                     recs.append(r.filter { $0.key != "text" && $0.key != "prompt" })
                 }

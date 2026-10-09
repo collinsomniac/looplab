@@ -94,7 +94,6 @@ enum DeviceProbe {
             "maxThreadsPerThreadgroup": [dev.maxThreadsPerThreadgroup.width, dev.maxThreadsPerThreadgroup.height, dev.maxThreadsPerThreadgroup.depth],
             "hasUnifiedMemory": dev.hasUnifiedMemory,
             "supportsRaytracing": dev.supportsRaytracing,
-            "supportsBFloat16": dev.supportsBFloat16,
             "supportsDynamicLibraries": dev.supportsDynamicLibraries,
             "readWriteTextureSupport": dev.readWriteTextureSupport.rawValue,
             "argumentBuffersSupport": dev.argumentBuffersSupport.rawValue,

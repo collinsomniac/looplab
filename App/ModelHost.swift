@@ -8,6 +8,12 @@ import Tokenizers
 
 /// Plug-and-play model host: any MLX checkpoint id on the Hugging Face Hub (mlx-community/...)
 /// or a local directory. One model resident at a time; every generation is measured.
+/// Sendable carrier for JSON-shaped results crossing actor boundaries.
+struct JSONBox: @unchecked Sendable {
+    let value: [String: Any]
+    init(_ v: [String: Any]) { value = v }
+}
+
 actor ModelHost {
     static let shared = ModelHost()
 
@@ -20,7 +26,10 @@ actor ModelHost {
     private(set) var loadSeconds: Double?
     private(set) var numParams: Int?
     private var container: ModelContainer?
-    private(set) var history: [[String: Any]] = []
+    private var history: [[String: Any]] = []
+    var historyCount: Int { history.count }
+    /// JSON-encoded so the value is Sendable across the actor boundary.
+    func historyJSON() -> Data { (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(history))) ?? Data("[]".utf8) }
 
     /// Curated starting points. Any other repo id works too.
     static let presets: [String: String] = [
@@ -31,7 +40,9 @@ actor ModelHost {
         "llama3.2-1b": "mlx-community/Llama-3.2-1B-Instruct-4bit",
     ]
 
-    func status() -> [String: Any] {
+    func status() -> JSONBox { JSONBox(statusDict()) }
+
+    private func statusDict() -> [String: Any] {
         var s: [String: Any] = ["state": state.rawValue, "progress": progress]
         if let modelId { s["model"] = modelId }
         if let lastError { s["error"] = lastError }
@@ -59,7 +70,7 @@ actor ModelHost {
         Memory.clearCache()
     }
 
-    func load(_ idOrPreset: String, cacheLimitMB: Int = 64) async throws -> [String: Any] {
+    func load(_ idOrPreset: String, cacheLimitMB: Int = 64) async throws -> JSONBox {
         let id = Self.presets[idOrPreset] ?? idOrPreset
         if modelId == id, container != nil { return status() }
         unload()
@@ -93,7 +104,7 @@ actor ModelHost {
     func setProgress(_ p: Double) { progress = p }
 
     /// Generate with full measurement. Returns text + timing + memory + thermal before/after.
-    func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil) async throws -> [String: Any] {
+    func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil) async throws -> JSONBox {
         guard let c = container else { throw NSError(domain: "ModelHost", code: 2, userInfo: [NSLocalizedDescriptionKey: "no model loaded"]) }
         state = .generating
         defer { state = .ready }
@@ -147,6 +158,6 @@ actor ModelHost {
         rec["mlxInfo"] = info
         history.append(rec)
         if history.count > 200 { history.removeFirst(history.count - 200) }
-        return rec
+        return JSONBox(rec)
     }
 }
