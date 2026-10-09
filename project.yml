@@ -39,7 +39,12 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        NSLocalNetworkUsageDescription: "LoopLab runs a control server on this device so the Minis assistant can drive experiments."
+        NSLocalNetworkUsageDescription: "LoopLab runs a control server and fetches job queues from a paired machine on your local network / tailnet."
+        # Plain-HTTP to the paired desktop on the tailnet (a private 100.x address) is blocked by default.
+        # Scoped to this development tool; the control API itself stays token-protected.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
         UIBackgroundModes: [processing]
         CFBundleURLTypes:
           - CFBundleURLName: io.github.collinsomniac.looplab
