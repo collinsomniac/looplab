@@ -104,7 +104,9 @@ actor ModelHost {
     func setProgress(_ p: Double) { progress = p }
 
     /// Generate with full measurement. Returns text + timing + memory + thermal before/after.
-    func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil) async throws -> JSONBox {
+    func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil,
+                  onFirstToken: (@Sendable () -> Void)? = nil,
+                  onChunk: (@Sendable (String) -> Void)? = nil) async throws -> JSONBox {
         guard let c = container else { throw NSError(domain: "ModelHost", code: 2, userInfo: [NSLocalizedDescriptionKey: "no model loaded"]) }
         state = .generating
         defer { state = .ready }
@@ -124,7 +126,8 @@ actor ModelHost {
         var info: [String: Any] = [:]
         for await item in stream {
             if let chunk = item.chunk {
-                if firstTokenAt == nil { firstTokenAt = Date() }
+                if firstTokenAt == nil { firstTokenAt = Date(); onFirstToken?() }
+                onChunk?(chunk)
                 text += chunk
                 chunks += 1
             }
