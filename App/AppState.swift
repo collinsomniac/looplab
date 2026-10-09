@@ -322,7 +322,7 @@ final class AppState: ObservableObject {
             default: break
             }
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            testResults.insert((name, "\(detail)  [\(ms) ms]"), at: 0)
+            testResults.insert((name: name, detail: "\(detail)  [\(ms) ms]", ok: ok), at: 0)
             if testResults.count > 12 { testResults.removeLast() }
             testRunning = false
             _ = ok
