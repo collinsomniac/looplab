@@ -1,0 +1,45 @@
+#!/bin/sh
+# ci — wait for the latest GitHub Actions run of a repo; on failure print the failing step and error lines.
+#   ci <owner/repo> [wait_seconds]
+R=${1:-collinsomniac/looplab}; W=${2:-1500}
+python3 - "$R" "$W" <<'PY'
+import json, os, sys, time, urllib.request, re
+repo, wait = sys.argv[1], int(sys.argv[2])
+tok = os.environ.get("GITHUB_TOKEN", "")
+def api(path, raw=False):
+    req = urllib.request.Request(f"https://api.github.com/repos/{repo}/{path}",
+                                 headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"})
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = r.read()
+                return data.decode("utf-8", "replace") if raw else json.loads(data)
+        except Exception as e:
+            if attempt == 3: raise
+            time.sleep(5)
+t = 0
+while True:
+    runs = api("actions/runs?per_page=1")["workflow_runs"]
+    if not runs: print("no runs"); sys.exit(2)
+    r = runs[0]
+    if r["status"] == "completed": break
+    if t >= wait: print(f"still {r['status']} after {wait}s (run {r['id']})"); sys.exit(2)
+    time.sleep(30); t += 30
+print(f"run {r['id']} {r['head_sha'][:7]}: {r['conclusion']} (waited {t}s)")
+if r["conclusion"] != "success":
+    jobs = api(f"actions/runs/{r['id']}/jobs")["jobs"]
+    for j in jobs:
+        for s in j["steps"]:
+            if s["conclusion"] not in ("success", "skipped", None): print("failed step:", s["name"])
+        log = api(f"actions/jobs/{j['id']}/logs", raw=True)
+        seen = set()
+        for line in log.splitlines():
+            line = re.sub(r"^\S+Z ", "", line)
+            if re.search(r"error:|fatal error|No such module|cannot find|Command .* failed|BUILD FAILED|ARCHIVE FAILED", line) and line not in seen:
+                seen.add(line); print("  ", line[:300])
+                if len(seen) >= 40: break
+    sys.exit(1)
+rel = api("releases/latest")
+print(rel.get("tag_name"))
+for a in rel.get("assets", []): print(" ", a["name"], a["size"] // 1048576, "MB", a["browser_download_url"])
+PY
