@@ -2,6 +2,7 @@ import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
+import MLXHuggingFace
 
 /// Additions to the model host: a raw command log for the terminal view, speculative decoding
 /// (lossless: the verifier's output is unchanged), and KV-cache quantization knobs.
@@ -55,7 +56,7 @@ extension ModelHost {
             let t0 = Date()
             var text = ""
             var info: [String: Any] = [:]
-            for await item in session.streamDetails(to: prompt) {
+            for try await item in session.streamDetails(to: prompt) {
                 if let chunk = item.chunk { text += chunk }
                 if let i = item.info {
                     info = ["tokensPerSecond": i.tokensPerSecond,
