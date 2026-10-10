@@ -139,6 +139,13 @@ final class JobRunner: @unchecked Sendable {
                 question: step["question"] as? String ?? "",
                 options: step["options"] as? [String] ?? ["yes", "no"],
                 instructions: step["instructions"] as? String).value
+        case "bench_cache":
+            return try await ModelHost.shared.benchCache(
+                prompt: step["prompt"] as? String ?? "Explain how a hash map works, in four sentences.",
+                maxTokens: step["maxTokens"] as? Int ?? 48).value
+        case "reset_chat":
+            await ModelHost.shared.resetChat()
+            return await ModelHost.shared.chatCacheReport().value
         case "echo":
             TermSink.shared.echoTokens = step["on"] as? Bool ?? true
             return ["echoTokens": TermSink.shared.echoTokens]

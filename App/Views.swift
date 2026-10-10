@@ -83,9 +83,15 @@ struct ChatView: View {
                 inputBar
             }
             .navigationTitle("LoopLab")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                Button { showConfig.toggle() } label: { Image(systemName: showConfig ? "slider.horizontal.3" : "slider.horizontal.below.rectangle") }
-            } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { app.newChat() } label: { Image(systemName: "square.and.pencil") }
+                        .disabled(app.messages.isEmpty && app.streaming.isEmpty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showConfig.toggle() } label: { Image(systemName: showConfig ? "slider.horizontal.3" : "slider.horizontal.below.rectangle") }
+                }
+            }
         }
     }
 

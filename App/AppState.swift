@@ -132,7 +132,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    func unload() { Task { await ModelHost.shared.unload(); await refreshModel() } }
+    func unload() { Task { await ModelHost.shared.unload(); await ModelHost.shared.resetChat(); await refreshModel() } }
+
+    /// Start a fresh conversation: drops the KV cache as well as the transcript.
+    func newChat() {
+        messages.removeAll(); streaming = ""
+        Task { await ModelHost.shared.resetChat() }
+    }
 
     func send(_ text: String) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,9 +150,12 @@ final class AppState: ObservableObject {
         lastTPS = 0; lastTTFT = 0; liveTPS = 0; liveTokens = 0
         Task {
             do {
-                let r = try await ModelHost.shared.generate(
-                    prompt: prompt, maxTokens: Int(maxTokens), temperature: Float(temperature),
-                    system: systemPrompt.isEmpty ? nil : systemPrompt, onFirstToken: { [weak self] in
+                // Chat uses the persistent session so turn 2+ reuses the prompt cache instead of
+                // prefilling the whole history again.
+                let r = try await ModelHost.shared.chat(
+                    prompt: prompt, system: systemPrompt.isEmpty ? nil : systemPrompt,
+                    maxTokens: Int(maxTokens), temperature: Float(temperature), thinking: false,
+                    onFirstToken: { [weak self] in
                         Task { @MainActor in self?.lastTTFT = Date().timeIntervalSince(self?.genStart ?? Date()) * 1000 }
                     }, onChunk: { [weak self] piece in
                         Task { @MainActor in

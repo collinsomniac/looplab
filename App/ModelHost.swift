@@ -138,6 +138,109 @@ actor ModelHost {
 
     func setProgress(_ p: Double) { progress = p }
 
+    // MARK: - chat with prompt-cache reuse
+
+    /// A live ChatSession keeps its KV cache, so turn 2+ only prefills the new message instead of
+    /// the whole history. Recreated when the model, system prompt or thinking mode changes.
+    private var chatSession: ChatSession?
+    private var chatKey: String?
+
+    func resetChat() {
+        chatSession = nil
+        chatKey = nil
+    }
+
+    /// Cache state of the live chat session, for reporting.
+    func chatCacheReport() async -> JSONBox {
+        guard let s = chatSession else { return JSONBox(["session": "none"]) }
+        var out: [String: Any] = ["session": "live"]
+        if let st = try? await s.cacheStatus() {
+            out["processedTokens"] = st.processedTokenCount ?? 0
+            out["phase"] = st.phase == .realized ? "realized" : "planned"
+            out["layers"] = st.layers.count
+        }
+        return JSONBox(out)
+    }
+
+    func chat(prompt: String, system: String?, maxTokens: Int, temperature: Float, thinking: Bool,
+              onFirstToken: (@Sendable () -> Void)? = nil,
+              onChunk: (@Sendable (String) -> Void)? = nil) async throws -> JSONBox {
+        guard let c = container else {
+            throw NSError(domain: "ModelHost", code: 2, userInfo: [NSLocalizedDescriptionKey: "no model loaded"])
+        }
+        state = .generating
+        defer { state = .ready }
+        let thermalBefore = DeviceProbe.thermalString()
+        let key = "\(modelId ?? "?")|\(system ?? "")|\(thinking)"
+        let cold = (chatKey != key) || (chatSession == nil)
+        if cold {
+            chatSession = ChatSession(c, instructions: system,
+                                      generateParameters: GenerateParameters(),
+                                      additionalContext: ["enable_thinking": thinking])
+            chatKey = key
+        }
+        let cacheTokens: Int
+        if let st = try? await chatSession?.cacheStatus() {
+            cacheTokens = st.processedTokenCount ?? 0
+        } else { cacheTokens = 0 }
+        TermSink.shared.line(cold ? "  chat session: new (cache cold)" : "  chat session: reused (\(cacheTokens) tokens cached)")
+
+        var params = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
+        if let kv = kvBitsOverride { params.kvBits = kv; params.quantizedKVStart = 0 }
+        chatSession?.generateParameters = params
+
+        let t0 = Date()
+        var text = ""
+        var info: [String: Any] = [:]
+        var firstTokenAt: Date?
+        for try await item in chatSession!.streamDetails(to: prompt) {
+            if let chunk = item.chunk {
+                if firstTokenAt == nil { firstTokenAt = Date(); onFirstToken?() }
+                if TermSink.shared.echoTokens { TermSink.shared.write(chunk) }
+                onChunk?(chunk)
+                text += chunk
+            }
+            if let i = item.info {
+                info = [
+                    "promptTokens": i.promptTokenCount,
+                    "generatedTokens": i.generationTokenCount,
+                    "tokensPerSecond": i.tokensPerSecond,
+                    "promptTokensPerSecond": i.promptTokensPerSecond,
+                ]
+            }
+        }
+        let t1 = Date()
+        var rec: [String: Any] = [
+            "model": modelId ?? "", "prompt": prompt, "text": text,
+            "ttftMs": ((firstTokenAt ?? t1).timeIntervalSince(t0)) * 1000,
+            "wallMs": t1.timeIntervalSince(t0) * 1000,
+            "cacheTokensBefore": cacheTokens, "cacheCold": cold,
+            "thermalBefore": thermalBefore, "thermalAfter": DeviceProbe.thermalString(),
+            "mlxMemory": Self.mlxMemory(),
+        ]
+        rec["mlxInfo"] = info
+        history.append(rec)
+        if history.count > 200 { history.removeFirst(history.count - 200) }
+        return JSONBox(rec)
+    }
+
+    /// Measure what the cache saves: same prompt twice, fresh session vs reused session.
+    func benchCache(prompt: String, maxTokens: Int = 48) async throws -> JSONBox {
+        resetChat()
+        let cold = try await chat(prompt: prompt, system: nil, maxTokens: maxTokens,
+                                  temperature: 0, thinking: false).value
+        let warm = try await chat(prompt: prompt, system: nil, maxTokens: maxTokens,
+                                  temperature: 0, thinking: false).value
+        return JSONBox([
+            "model": modelId ?? "?",
+            "coldTtFTMs": cold["ttftMs"] ?? 0, "warmTtFTMs": warm["ttftMs"] ?? 0,
+            "coldPromptTokens": (cold["mlxInfo"] as? [String: Any])?["promptTokens"] ?? 0,
+            "warmPromptTokens": (warm["mlxInfo"] as? [String: Any])?["promptTokens"] ?? 0,
+            "cachedTokensBeforeWarm": warm["cacheTokensBefore"] ?? 0,
+            "speedup": ((cold["ttftMs"] as? Double) ?? 0) / max(1, (warm["ttftMs"] as? Double) ?? 1),
+        ])
+    }
+
     /// How many times the looped stack is applied for the loaded model (no-op for non-looped models).
     @discardableResult
     func setLoops(_ n: Int) async -> JSONBox {
