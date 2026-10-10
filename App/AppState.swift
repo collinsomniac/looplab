@@ -65,6 +65,8 @@ final class AppState: ObservableObject {
     @Published var queueStepTotal = 0
     @Published var jobLog: [String] = []
     @Published var lastRunFinished = false
+    @Published var queueRuns: [String: String] = [:]   // job id -> terminal run id
+    var queueSpecs: [String: [[String: Any]]] = [:]
 
     // tests
     @Published var testResults: [(name: String, detail: String, ok: Bool)] = []
@@ -216,6 +218,7 @@ final class AppState: ObservableObject {
                 queueItems = jobs.map { j in
                     (j["id"] as? String ?? "?", j["label"] as? String ?? "", (j["steps"] as? [Any])?.count ?? 0, "pending")
                 }
+                for j in jobs { if let id = j["id"] as? String { queueSpecs[id] = j["steps"] as? [[String: Any]] ?? [] } }
                 jobLog.append("queue: \(queueItems.count) item(s) pending")
             } catch { queueReachable = false; queueError = "\(error)" }
         }
@@ -242,23 +245,29 @@ final class AppState: ObservableObject {
                 queueStepTotal = steps.count
                 queueStepIndex = 0
                 queueItems = queueItems.map { $0.id == id ? ($0.id, $0.label, $0.steps, "running") : $0 }
-                jobLog.append("▶ \(id) — \(steps.count) steps")
+                let run = TermSink.shared.begin(id)
+                queueRuns[id] = run
+                let term = TermSink.shared
+                term.line("# \(run)")
+                term.line("# \(job["label"] as? String ?? "")")
+                term.line("# device \(DeviceProbe.snapshot()["machine"] ?? "?") · build \(version) (\(build)) · thermal \(DeviceProbe.thermalString())\n")
+                let jobStart = Date()
                 for (i, step) in steps.enumerated() {
                     queueStepIndex = i + 1
                     let t0 = Date()
-                    let specJSON = (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(step), options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                    RawLog.shared.append("[\(id) \(i + 1)/\(steps.count)] $ \(specJSON)")
-                    var out: [String: Any] = ["job": id, "i": i, "op": step["op"] as? String ?? "?"]
+                    term.line(String(format: "[%@ %3d/%d] $ ", Self.clock(), i + 1, steps.count) + Terminal.command(step))
+                    var out: [String: Any] = ["job": id, "i": i, "op": step["op"] as? String ?? "?", "run": run]
                     if let e = await JobRunnerBridge.run(step) { out.merge(e) { a, _ in a } }
-                    let outJSON = (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(out), options: [.prettyPrinted, .sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                    RawLog.shared.append("  -> \(outJSON.prefix(4000))")
                     out["ms"] = Int(Date().timeIntervalSince(t0) * 1000)
                     out["thermal"] = DeviceProbe.thermalString()
+                    for l in Self.resultLines(out) { term.line("  " + l) }
+                    term.line(String(format: "  (%.2f s · %@)", Date().timeIntervalSince(t0), out["thermal"] as? String ?? ""))
                     sendToDesktop("/results", out)
-                    jobLog.append("  · \(out["op"] ?? "") \(out["ms"] ?? 0)ms \(Self.summarize(out))")
                 }
+                term.line(String(format: "\n# done in %.1f s", Date().timeIntervalSince(jobStart)))
+                TermSink.shared.end()
                 sendToDesktop("/results", ["job": id, "op": "job_end", "steps": steps.count])
-                sendToDesktop("/queue/done", ["id": id])
+                sendToDesktop("/queue/done", ["id": id, "run": queueRuns[id] ?? ""])
                 queueItems = queueItems.map { $0.id == id ? ($0.id, $0.label, $0.steps, "done") : $0 }
                 jobLog.append("✓ \(id) done")
                 processed += 1
@@ -268,6 +277,38 @@ final class AppState: ObservableObject {
             queueCurrentJob = nil
             lastRunFinished = true
             jobLog.append("queue drained at \(Self.clock())")
+        }
+    }
+
+    /// The interesting part of a step result, as terminal lines (no wall of JSON).
+    static func resultLines(_ o: [String: Any]) -> [String] {
+        if let e = o["error"] { return ["error: \(e)"] }
+        func f(_ v: Any?, _ d: Int = 1) -> String { String(format: "%.\(d)f", (v as? Double) ?? Double((v as? Int) ?? 0)) }
+        switch o["op"] as? String ?? "" {
+        case "generate":
+            let i = o["mlxInfo"] as? [String: Any] ?? [:]
+            return ["\(i["generatedTokens"] ?? 0) tok · \(f(i["tokensPerSecond"])) tok/s · ttft \(f(o["ttftMs"], 0)) ms · prompt \(i["promptTokens"] ?? 0) tok"]
+        case "decide":
+            let p = (o["probabilities"] as? [String: Double] ?? [:]).sorted { $0.value > $1.value }
+                .map { "\($0.key)=\(String(format: "%.3f", $0.value))" }.joined(separator: " ")
+            return ["-> \(o["answer"] ?? "?")   [\(p)]  \(f(o["totalMs"], 0)) ms · \(o["promptTokens"] ?? 0) tok"]
+        case "load":
+            return ["\(o["state"] ?? "?") · \(o["params"] ?? "?") params · \(f(o["loadSeconds"], 2)) s"]
+        case "bench_decode":
+            let rs = (o["runs"] as? [[String: Any]] ?? []).map { f($0["tokensPerSecond"]) }.joined(separator: ", ")
+            return ["tok/s runs [\(rs)] median \(f(o["median"]))"]
+        case "bench_spec":
+            return ["plain \(f(o["plainTps"])) -> spec \(f(o["specTps"])) tok/s  x\(f(o["speedup"], 2))  identical=\(o["identicalOutput"] ?? "?")"]
+        case "read_bench":
+            return ["seq \(f(o["seqGBps"], 2)) GB/s · random 4MB \(f(o["randomGBps"], 2)) GB/s · p50 \(f(o["randomMsP50"], 1)) ms p95 \(f(o["randomMsP95"], 1)) ms"]
+        case "probe":
+            return ["available \(String(format: "%.2f", Double(bytes(o["availableToProcess"])) / 1_073_741_824)) GB · thermal \(o["thermal"] ?? "?")"]
+        default:
+            let skip: Set<String> = ["job", "i", "op", "run", "ms", "thermal", "text", "plainText", "specText"]
+            let d = o.filter { !skip.contains($0.key) }
+            let data = (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(d), options: [.sortedKeys])) ?? Data()
+            let s = String(data: data, encoding: .utf8) ?? ""
+            return [s.count > 600 ? String(s.prefix(600)) + "…" : s]
         }
     }
 

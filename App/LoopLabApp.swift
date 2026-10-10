@@ -48,9 +48,9 @@ struct RootView: View {
         TabView {
             ChatView().tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
             QueueView().tabItem { Label("Queue", systemImage: "list.bullet.rectangle") }
+            ModelsView().tabItem { Label("Models", systemImage: "cube.box") }
             TestsView().tabItem { Label("Tests", systemImage: "gauge.with.dots.needle.50percent") }
             DeviceView().tabItem { Label("Device", systemImage: "cpu") }
-            ControlView().tabItem { Label("Control", systemImage: "antenna.radiowaves.left.and.right") }
         }
     }
 }

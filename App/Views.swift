@@ -93,8 +93,17 @@ struct ChatView: View {
         VStack(spacing: 6) {
             HStack {
                 Menu {
-                    ForEach(app.modelPresets.keys.sorted(), id: \.self) { key in
-                        Button("\(key)  →  \(app.modelPresets[key] ?? "")") { app.load(key) }
+                    Section("Installed") {
+                        ForEach(ModelStore.installed()) { m in
+                            Button("\(m.name)  ·  \(m.sizeText)") { app.load(m.id) }
+                        }
+                    }
+                    Section("Download & load") {
+                        ForEach(app.modelPresets.keys.sorted(), id: \.self) { key in
+                            if !ModelStore.isInstalled(app.modelPresets[key] ?? key) {
+                                Button("\(key)") { app.load(key) }
+                            }
+                        }
                     }
                 } label: {
                     Label(app.loadedModel ?? app.configuredModel, systemImage: "cube.box")
@@ -191,78 +200,138 @@ struct ChatView: View {
 
 struct QueueView: View {
     @ObservedObject var app = AppState.shared
-    @State private var showConn = false
+    @ObservedObject var term = Terminal.shared
+    @State private var showSettings = false
+    @State private var follow = true
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Connection") {
-                    HStack {
-                        Circle().fill(app.queueReachable ? .green : (app.queueError == nil ? .orange : .red)).frame(width: 8, height: 8)
-                        Text(app.queueReachable ? "desktop reachable" : (app.queueError == nil ? "not checked" : "unreachable"))
-                            .font(.subheadline)
-                        Spacer()
-                        Button("Check") { app.checkDesktop() }.font(.caption).buttonStyle(.bordered)
-                    }
-                    if let e = app.queueError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(4) }
-                    DisclosureGroup("Settings", isExpanded: $showConn) {
-                        TextField("queue URL", text: $app.queueURL)
-                            .font(.caption.monospaced()).autocorrectionDisabled().textInputAutocapitalization(.never)
-                        TextField("token (optional)", text: $app.queueToken)
-                            .font(.caption.monospaced()).autocorrectionDisabled().textInputAutocapitalization(.never)
-                        Button("Save & re-check") { app.saveQueueSettings(); app.checkDesktop() }.font(.caption)
-                    }
-                }
-
-                Section {
-                    Button { app.refreshQueue() } label: { Label("Refresh queue", systemImage: "arrow.clockwise") }
-                    Button { app.runQueue() } label: {
-                        Label(app.queueRunning ? "Running…" : "Run queue", systemImage: "play.fill")
-                    }
-                    .disabled(app.queueRunning)
-                }
-
-                if app.queueRunning || app.queueStepTotal > 0 {
-                    Section("Progress") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(app.queueCurrentJob ?? "—").font(.footnote.monospaced())
-                            ProgressView(value: Double(app.queueStepIndex), total: Double(max(app.queueStepTotal, 1)))
-                            Text("step \(app.queueStepIndex) of \(app.queueStepTotal)")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Queue items (\(app.queueItems.count))") {
-                    if app.queueItems.isEmpty {
-                        Text("nothing pending").font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(Array(app.queueItems.enumerated()), id: \.offset) { _, item in
-                        HStack {
-                            Image(systemName: item.state == "done" ? "checkmark.circle.fill" : item.state == "running" ? "play.circle.fill" : "circle")
-                                .foregroundStyle(item.state == "done" ? .green : item.state == "running" ? .blue : .secondary)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(item.id).font(.footnote.monospaced())
-                                if !item.label.isEmpty { Text(item.label).font(.caption2).foregroundStyle(.secondary) }
-                            }
-                            Spacer()
-                            Text("\(item.steps) steps").font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Live log") {
-                    if app.jobLog.isEmpty { Text("no activity yet").font(.footnote).foregroundStyle(.secondary) }
-                    ForEach(Array(app.jobLog.suffix(40).enumerated()), id: \.offset) { _, l in
-                        Text(l).font(.caption2.monospaced())
-                    }
-                }
+            VStack(spacing: 0) {
+                header
+                runStrip
+                terminal
             }
             .navigationTitle("Queue")
-            .onAppear { if !app.lastRunFinished { app.refreshQueue() } }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showSettings = true } label: {
+                        Image(systemName: "circle.fill").font(.system(size: 9))
+                            .foregroundStyle(app.queueReachable ? .green : (app.queueError == nil ? .orange : .red))
+                        Image(systemName: "gearshape")
+                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { app.refreshQueue(); Task { await term.loadHistory() } } label: { Image(systemName: "arrow.clockwise") }
+                    Button { UIPasteboard.general.string = term.shown } label: { Image(systemName: "doc.on.doc") }
+                }
+            }
+            .sheet(isPresented: $showSettings) { settings }
+            .onAppear {
+                if !app.lastRunFinished { app.refreshQueue() }
+                Task { await term.loadHistory() }
+            }
         }
     }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Button { app.runQueue() } label: {
+                Label(app.queueRunning ? "Running" : "Run queue", systemImage: app.queueRunning ? "hourglass" : "play.fill")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent).disabled(app.queueRunning)
+            if app.queueRunning {
+                ProgressView(value: Double(app.queueStepIndex), total: Double(max(app.queueStepTotal, 1))).frame(maxWidth: 120)
+                Text("\(app.queueStepIndex)/\(app.queueStepTotal)").font(.caption.monospaced())
+            }
+            Spacer()
+            Toggle(isOn: $follow) { Image(systemName: "arrow.down.to.line") }.toggleStyle(.button).font(.caption)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// Every run as a tab: pending jobs, this session's runs, and runs stored on the desktop.
+    private var runStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(app.queueItems.filter { $0.state == "pending" }, id: \.id) { item in
+                    chip(item.id, sub: "queued · \(item.steps)", key: "pending:\(item.id)", color: .orange) {
+                        term.showPending(item.id, steps: app.queueSpecs[item.id] ?? [])
+                    }
+                }
+                ForEach(term.sessionRuns.reversed(), id: \.self) { r in
+                    chip(Self.short(r), sub: r == TermSinkSnapshot.current ? "live" : "this session", key: r,
+                         color: r == TermSinkSnapshot.current ? .green : .blue) { term.select(r) }
+                }
+                ForEach(term.desktopRuns.filter { !term.sessionRuns.contains($0) }.prefix(30), id: \.self) { r in
+                    chip(Self.short(r), sub: Self.stamp(r), key: r, color: .secondary) { term.select(r) }
+                }
+            }
+            .padding(.horizontal, 12).padding(.bottom, 6)
+        }
+    }
+
+    private func chip(_ title: String, sub: String, key: String, color: Color, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.caption.monospaced()).lineLimit(1)
+                Text(sub).font(.system(size: 9)).foregroundStyle(color)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(term.selected == key ? Color.accentColor.opacity(0.25) : Color(.secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var terminal: some View {
+        ScrollViewReader { proxy in
+            ScrollView([.vertical]) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if term.loading { ProgressView().padding() }
+                    Text(term.shown.isEmpty ? "$ _\n\n(tap Run queue — every command and its output streams here)" : term.shown)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color(red: 0.80, green: 0.95, blue: 0.80))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                    Color.clear.frame(height: 1).id("end")
+                }
+            }
+            .background(Color.black)
+            .onChange(of: term.shown.count) { _, _ in if follow { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: term.selected) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
+        }
+    }
+
+    private var settings: some View {
+        NavigationStack {
+            Form {
+                Section("Desktop") {
+                    TextField("queue URL", text: $app.queueURL).font(.caption.monospaced())
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    TextField("token (optional)", text: $app.queueToken).font(.caption.monospaced())
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button("Save & check") { app.saveQueueSettings(); app.checkDesktop() }
+                    if let e = app.queueError { Text(e).font(.caption2).foregroundStyle(.red) }
+                    else if app.queueReachable { Text("reachable").font(.caption2).foregroundStyle(.green) }
+                }
+            }
+            .navigationTitle("Queue settings")
+            .toolbar { Button("Done") { showSettings = false } }
+        }
+        .presentationDetents([.medium])
+    }
+
+    static func short(_ r: String) -> String { String(r.split(separator: "@").first ?? Substring(r)) }
+    static func stamp(_ r: String) -> String {
+        guard let s = r.split(separator: "@").last, s.count >= 13 else { return "desktop" }
+        let a = Array(s); return "\(String(a[4...5]))/\(String(a[6...7])) \(String(a[9...10])):\(String(a[11...12]))"
+    }
 }
+
+enum TermSinkSnapshot { static var current: String? { TermSink.shared.run } }
 
 // MARK: - Tests
 
@@ -360,6 +429,7 @@ struct DeviceView: View {
                     }
                 }
                 Section {
+                    NavigationLink("Control server & log") { ControlView() }
                     Toggle("Raw JSON", isOn: $showRaw)
                     if showRaw {
                         Text(String(data: (try? JSONSerialization.data(withJSONObject: ControlServer.sanitize(app.device), options: [.prettyPrinted, .sortedKeys])) ?? Data(), encoding: .utf8) ?? "")
@@ -378,7 +448,7 @@ struct ControlView: View {
     @ObservedObject var app = AppState.shared
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 Section("Loopback control server") {
                     KV(k: "bound hosts", v: app.controlHosts.isEmpty ? "—" : app.controlHosts.joined(separator: ", "))

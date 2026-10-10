@@ -139,6 +139,15 @@ final class JobRunner: @unchecked Sendable {
                 question: step["question"] as? String ?? "",
                 options: step["options"] as? [String] ?? ["yes", "no"],
                 instructions: step["instructions"] as? String).value
+        case "read_bench":
+            let id = ModelHost.presets[step["model"] as? String ?? ""] ?? (step["model"] as? String ?? "")
+            return ModelStore.readBench(id: id, megabytes: step["megabytes"] as? Int ?? 512,
+                                        noCache: step["noCache"] as? Bool ?? true,
+                                        randomReads: step["randomReads"] as? Int ?? 64)
+        case "library":
+            return ["root": ModelStore.root.path,
+                    "models": ModelStore.installed().map { ["id": $0.id, "bytes": $0.bytes, "type": $0.modelType,
+                                                            "thinking": $0.thinkingCapable, "looped": $0.looped] }]
         case "load_draft":
             return try await ModelHost.shared.loadDraft(step["model"] as? String ?? "qwen3-0.6b").value
         case "unload_draft":

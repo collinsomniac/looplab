@@ -25,6 +25,7 @@ actor ModelHost {
     private(set) var lastError: String?
     private(set) var loadSeconds: Double?
     private(set) var numParams: Int?
+    private(set) var lastRead: [String: Any] = [:]
     var container: ModelContainer?
     /// Optional smaller model used to propose tokens for speculative decoding.
     /// When set, generation uses a quantized KV cache (e.g. 8 or 4 bits) instead of fp16.
@@ -62,6 +63,7 @@ actor ModelHost {
         if let lastError { s["error"] = lastError }
         if let loadSeconds { s["loadSeconds"] = loadSeconds }
         if let numParams { s["params"] = numParams }
+        s.merge(lastRead) { a, _ in a }
         s["mlxMemory"] = Self.mlxMemory()
         s["generations"] = history.count
         return s
@@ -93,17 +95,31 @@ actor ModelHost {
         Memory.peakMemory = 0
         let t0 = Date()
         do {
-            let config = ModelConfiguration(id: id)
-            let downloader = #hubDownloader()
-            let resolved = try await resolve(configuration: config, from: downloader, useLatest: false) { p in
-                Task { await ModelHost.shared.setProgress(p.fractionCompleted) }
+            let dir: URL
+            if ModelStore.isInstalled(id) {
+                dir = ModelStore.dir(for: id)
+                TermSink.shared.line("  from library: \(dir.lastPathComponent)")
+            } else {
+                TermSink.shared.line("  downloading \(id) into the library")
+                let downloader = #hubDownloader()
+                let resolved = try await resolve(configuration: ModelConfiguration(id: id), from: downloader, useLatest: false) { p in
+                    TermSink.shared.progress(p.fractionCompleted)
+                    Task { await ModelHost.shared.setProgress(p.fractionCompleted) }
+                }
+                dir = try ModelStore.adopt(from: resolved.modelDirectory, id: id)
+                TermSink.shared.line("  saved to Files › LoopLab › Models › \(dir.lastPathComponent)")
             }
             state = .loading
+            let tRead = Date()
             let c = try await LLMModelFactory.shared.loadContainer(
-                from: resolved.modelDirectory, using: #huggingFaceTokenizerLoader())
+                from: dir, using: #huggingFaceTokenizerLoader())
+            let readS = Date().timeIntervalSince(tRead)
+            let diskBytes = ModelStore.size(of: dir)
+            TermSink.shared.line(String(format: "  read %.2f GB in %.2f s (%.2f GB/s)", Double(diskBytes) / 1e9, readS, readS > 0 ? Double(diskBytes) / readS / 1e9 : 0))
             numParams = await c.perform { $0.model.numParameters() }
             container = c
             loadSeconds = Date().timeIntervalSince(t0)
+            lastRead = ["readSeconds": readS, "diskBytes": diskBytes, "fromLibrary": true]
             state = .ready
             Log.shared.add("loaded \(id) in \(String(format: "%.1f", loadSeconds ?? 0)) s, params=\(numParams ?? 0)")
             return status()
@@ -176,6 +192,7 @@ actor ModelHost {
     /// Generate with full measurement. Returns text + timing + memory + thermal before/after.
     func generate(prompt: String, maxTokens: Int = 256, temperature: Float = 0, system: String? = nil,
                   thinking: Bool = false,
+                  topP: Float? = nil, repetitionPenalty: Float? = nil, seed: UInt64? = nil,
                   onFirstToken: (@Sendable () -> Void)? = nil,
                   onChunk: (@Sendable (String) -> Void)? = nil) async throws -> JSONBox {
         guard let c = container else { throw NSError(domain: "ModelHost", code: 2, userInfo: [NSLocalizedDescriptionKey: "no model loaded"]) }
@@ -190,6 +207,9 @@ actor ModelHost {
         let input = try await c.prepare(input: UserInput(chat: chat, additionalContext: ["enable_thinking": thinking]))
         let promptTokens = input.text.tokens.size
         var params = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
+        if let topP { params.topP = topP }
+        if let repetitionPenalty, repetitionPenalty != 1 { params.repetitionPenalty = repetitionPenalty }
+        if let seed { params.seed = seed }
         if let kv = kvBitsOverride {
             params.kvBits = kv
             params.quantizedKVStart = 0
@@ -202,7 +222,8 @@ actor ModelHost {
         var info: [String: Any] = [:]
         for await item in stream {
             if let chunk = item.chunk {
-                if firstTokenAt == nil { firstTokenAt = Date(); onFirstToken?() }
+                if firstTokenAt == nil { firstTokenAt = Date(); onFirstToken?(); TermSink.shared.write("  │ ") }
+                TermSink.shared.write(chunk.replacingOccurrences(of: "\n", with: "\n  │ "))
                 onChunk?(chunk)
                 text += chunk
                 chunks += 1
@@ -217,6 +238,7 @@ actor ModelHost {
             }
         }
         let t1 = Date()
+        if firstTokenAt != nil { TermSink.shared.write("\n") }
         let ttft = (firstTokenAt ?? t1).timeIntervalSince(t0)
         var rec: [String: Any] = [
             "model": modelId ?? "",
