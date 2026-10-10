@@ -12,12 +12,13 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use isideload::anisette::remote_v3::RemoteV3AnisetteProvider;
 use isideload::auth::apple_account::{AppleAccount, TwoFactorCallbackParams, TwoFactorCallbackResponse};
 use isideload::dev::developer_session::DeveloperSession;
 use isideload::sideload::builder::MaxCertsBehavior;
 use isideload::sideload::SideloaderBuilder;
+use isideload::util::callbacks::MaxCertsCallbackBox;
 use isideload::util::keyring_storage::KeyringStorage;
 use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;
@@ -25,7 +26,14 @@ use zip::write::SimpleFileOptions;
 const STORAGE_SERVICE: &str = "iloader";
 const MACHINE_NAME: &str = "iloader"; // must match iloader's, so the cached cert identity is reused
 
-fn two_factor_callback(params: TwoFactorCallbackParams) -> std::future::Ready<Result<TwoFactorCallbackResponse, rootcause::Report>> {
+/// isideload reports through `rootcause::Report`, which is not `std::error::Error`.
+fn rc<T>(r: Result<T, rootcause::Report>, what: &str) -> Result<T> {
+    r.map_err(|e| anyhow!("{what}: {e:?}"))
+}
+
+fn two_factor_callback(
+    params: TwoFactorCallbackParams,
+) -> std::future::Ready<Result<TwoFactorCallbackResponse, rootcause::Report>> {
     println!("2FA required: {params:?}");
     println!("Enter the code (or 'd' for devices, 'r' to resend):");
     let mut code = String::new();
@@ -59,7 +67,6 @@ fn zip_app(app_dir: &Path, out: &Path) -> Result<()> {
         } else {
             buf.clear();
             File::open(entry.path())?.read_to_end(&mut buf)?;
-            zw.start_file(arc, opts)?;
             std::io::Write::write_all(&mut zw, &buf)?;
         }
     }
@@ -73,7 +80,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
 
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 6 {
+    if args.len() < 6 || args[1] != "sign" {
         eprintln!("usage: loopdeploy sign <in.ipa> <out.ipa> <apple-id> <udid> [anisette-server]");
         std::process::exit(2);
     }
@@ -85,46 +92,59 @@ async fn main() -> Result<()> {
         .get(6)
         .cloned()
         .unwrap_or_else(|| "https://ani.sidestore.io".to_string());
-    let anisette_url = if anisette.starts_with("http") { anisette } else { format!("https://{anisette}") };
+    let anisette_url = if anisette.starts_with("http") {
+        anisette
+    } else {
+        format!("https://{anisette}")
+    };
 
     println!("signing {} for {}", in_ipa.display(), udid);
 
     let password = keyring::Entry::new(STORAGE_SERVICE, &email)
-        .context("keyring entry")?
+        .map_err(|e| anyhow!("keyring entry: {e}"))?
         .get_password()
-        .context("no saved Apple ID password for this account (open iloader and sign in with 'save credentials')")?;
+        .map_err(|e| anyhow!("no saved Apple ID password for {email} ({e}); open iloader and sign in with \"save credentials\" enabled"))?;
     println!("credentials found for {email}");
 
-    let storage = || -> Result<Box<KeyringStorage>> { Ok(Box::new(KeyringStorage::new(STORAGE_SERVICE.to_string()))) };
+    let storage = Box::new(KeyringStorage::new(STORAGE_SERVICE.to_string()));
 
-    let mut account = AppleAccount::builder(&email)
-        .anisette_provider(
-            RemoteV3AnisetteProvider::default()?
-                .set_serial_number("0".to_string())
-                .set_storage(storage()?)
-                .set_url(&anisette_url),
-        )
-        .login(&password, two_factor_callback)
-        .await
-        .context("Apple ID login failed")?;
+    let mut account = rc(
+        AppleAccount::builder(&email)
+            .anisette_provider(
+                rc(
+                    RemoteV3AnisetteProvider::default()
+                        .and_then(|p| Ok(p.set_serial_number("0".to_string()).set_url(&anisette_url))),
+                    "anisette",
+                )?,
+            )
+            .login(&password, two_factor_callback)
+            .await,
+        "Apple ID login",
+    )?;
     println!("logged in");
 
-    let dev_session = DeveloperSession::from_account(&mut account).await.context("developer session")?;
+    let dev_session = rc(DeveloperSession::from_account(&mut account).await, "developer session")?;
 
-    let mut sideloader = SideloaderBuilder::new(dev_session, email.clone())
+    let builder: SideloaderBuilder<MaxCertsCallbackBox> = SideloaderBuilder::new(dev_session, email.clone());
+    let mut sideloader = builder
         .machine_name(MACHINE_NAME.to_string())
-        .storage(storage()?)
-        .max_certs_behavior(MaxCertsBehavior::Revoke)
+        .storage(storage)
+        .max_certs_behavior(MaxCertsBehavior::<MaxCertsCallbackBox>::Revoke)
         .build();
 
-    let progress = |f: f32| { print!("\r  signing {:.0}%", f * 100.0); std::future::ready(()) };
-    let (signed_app, _special) = sideloader
-        .sign_app(in_ipa, None, true, Some(progress), None, Some(&udid))
-        .await
-        .context("signing failed")?;
-    println!("\nsigned app: {}", signed_app.display());
+    let progress = |f: f32| {
+        println!("  signing {:.0}%", f * 100.0);
+        std::future::ready(())
+    };
+    let (signed_app, _special) = rc(
+        sideloader
+            .sign_app(in_ipa, None, true, Some(progress), None, Some(&udid))
+            .await,
+        "signing",
+    )?;
+    println!("signed app: {}", signed_app.display());
 
-    zip_app(&signed_app, &out_ipa).context("repackaging as IPA")?;
+    zip_app(&signed_app, &out_ipa)?;
     let size = std::fs::metadata(&out_ipa)?.len();
     println!("wrote {} ({} bytes)", out_ipa.display(), size);
     Ok(())

@@ -12,6 +12,7 @@ keyring = { version = "3", features = ["windows-native"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 anyhow = "1"
+rootcause = "0.12"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
