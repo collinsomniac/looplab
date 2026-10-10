@@ -109,6 +109,7 @@ actor ModelHost {
                 dir = try ModelStore.adopt(from: resolved.modelDirectory, id: id)
                 TermSink.shared.line("  saved to Files › LoopLab › Models › \(dir.lastPathComponent)")
             }
+            if let fix = ModelStore.normalizeTokenizer(in: dir) { TermSink.shared.line("  tokenizer: \(fix)") }
             state = .loading
             let tRead = Date()
             let c = try await LLMModelFactory.shared.loadContainer(
@@ -222,8 +223,8 @@ actor ModelHost {
         var info: [String: Any] = [:]
         for await item in stream {
             if let chunk = item.chunk {
-                if firstTokenAt == nil { firstTokenAt = Date(); onFirstToken?(); TermSink.shared.write("  │ ") }
-                TermSink.shared.write(chunk.replacingOccurrences(of: "\n", with: "\n  │ "))
+                if firstTokenAt == nil { firstTokenAt = Date(); onFirstToken?(); if TermSink.shared.echoTokens { TermSink.shared.write("  │ ") } }
+                if TermSink.shared.echoTokens { TermSink.shared.write(chunk.replacingOccurrences(of: "\n", with: "\n  │ ")) }
                 onChunk?(chunk)
                 text += chunk
                 chunks += 1
@@ -238,7 +239,7 @@ actor ModelHost {
             }
         }
         let t1 = Date()
-        if firstTokenAt != nil { TermSink.shared.write("\n") }
+        if firstTokenAt != nil && TermSink.shared.echoTokens { TermSink.shared.write("\n") }
         let ttft = (firstTokenAt ?? t1).timeIntervalSince(t0)
         var rec: [String: Any] = [
             "model": modelId ?? "",

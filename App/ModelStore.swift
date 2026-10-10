@@ -122,6 +122,26 @@ enum ModelStore {
         return dest
     }
 
+    /// Tokenizer classes that are plain byte-level BPE but whose names swift-transformers does not map.
+    static let tokenizerAliases: [String: String] = [
+        "GPTNeoXTokenizer": "PreTrainedTokenizer", "GPTNeoXTokenizerFast": "PreTrainedTokenizer",
+        "GPT2Tokenizer": "PreTrainedTokenizer", "GPT2TokenizerFast": "PreTrainedTokenizer",
+        "Qwen2TokenizerFast": "Qwen2Tokenizer",
+    ]
+
+    /// Rewrite an unsupported tokenizer_class in place (keeps the original under _looplab_original_class).
+    @discardableResult
+    static func normalizeTokenizer(in dir: URL) -> String? {
+        let p = dir.appendingPathComponent("tokenizer_config.json")
+        guard let data = try? Data(contentsOf: p),
+              var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let cls = obj["tokenizer_class"] as? String, let to = tokenizerAliases[cls] else { return nil }
+        obj["tokenizer_class"] = to
+        obj["_looplab_original_class"] = cls
+        if let out = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) { try? out.write(to: p) }
+        return "\(cls) -> \(to)"
+    }
+
     static func delete(_ id: String) throws {
         try FileManager.default.removeItem(at: dir(for: id))
     }

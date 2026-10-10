@@ -65,6 +65,7 @@ final class AppState: ObservableObject {
     @Published var queueStepTotal = 0
     @Published var jobLog: [String] = []
     @Published var lastRunFinished = false
+    @Published var visibleTab = "chat"
     @Published var queueRuns: [String: String] = [:]   // job id -> terminal run id
     var queueSpecs: [String: [[String: Any]]] = [:]
 
@@ -260,6 +261,9 @@ final class AppState: ObservableObject {
                     if let e = await JobRunnerBridge.run(step) { out.merge(e) { a, _ in a } }
                     out["ms"] = Int(Date().timeIntervalSince(t0) * 1000)
                     out["thermal"] = DeviceProbe.thermalString()
+                    out["tab"] = visibleTab
+                    out["echo"] = TermSink.shared.echoTokens
+                    out["battery"] = UIDevice.current.batteryLevel
                     for l in Self.resultLines(out) { term.line("  " + l) }
                     term.line(String(format: "  (%.2f s · %@)", Date().timeIntervalSince(t0), out["thermal"] as? String ?? ""))
                     sendToDesktop("/results", out)

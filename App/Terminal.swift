@@ -15,6 +15,9 @@ final class TermSink: @unchecked Sendable {
     private var lastTenth = -1
 
     var active: Bool { lock.lock(); defer { lock.unlock() }; return run != nil }
+    /// Stream generated tokens into the terminal. A job can switch it off ({"op":"echo","on":false})
+    /// to measure what live display costs.
+    var echoTokens = true
 
     func begin(_ name: String) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
@@ -103,18 +106,29 @@ enum Desktop {
 /// What the Queue tab shows: one terminal per run, newest selected while running.
 @MainActor final class Terminal: ObservableObject {
     static let shared = Terminal()
-    @Published var texts: [String: String] = [:]
+    /// Lines per run. Rendering is lazy (only visible lines are laid out), and the UI refreshes at
+    /// 4 Hz, so a long run costs the same to display as a short one.
+    @Published private(set) var lines: [String: [String]] = [:]
     @Published var sessionRuns: [String] = []
     @Published var desktopRuns: [String] = []
     @Published var selected: String?
     @Published var loading = false
     private var timer: Timer?
-    static let displayCap = 80_000
+    static let lineCap = 4000
 
     init() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
             Task { @MainActor in Terminal.shared.pump() }
         }
+    }
+
+    private func append(_ text: String, to r: String) {
+        var ls = lines[r] ?? [""]
+        let parts = text.split(separator: "\n", omittingEmptySubsequences: false)
+        ls[ls.count - 1] += parts[0]
+        for p in parts.dropFirst() { ls.append(String(p)) }
+        if ls.count > Self.lineCap { ls.removeFirst(ls.count - Self.lineCap); ls[0] = "… earlier lines are in the desktop log …" }
+        lines[r] = ls
     }
 
     func pump() {
@@ -122,26 +136,23 @@ enum Desktop {
         guard !batch.isEmpty else { return }
         for (r, t) in batch {
             if !sessionRuns.contains(r) { sessionRuns.append(r); selected = r }
-            var s = (texts[r] ?? "") + t
-            if s.count > Self.displayCap {
-                s = "… earlier output is in the desktop log …\n" + String(s.suffix(Self.displayCap))
-            }
-            texts[r] = s
+            append(t, to: r)
         }
     }
 
-    var shown: String { selected.flatMap { texts[$0] } ?? "" }
+    var shownLines: [String] { selected.flatMap { lines[$0] } ?? [] }
+    var shown: String { shownLines.joined(separator: "\n") }
 
     func select(_ r: String) {
         selected = r
-        if texts[r] == nil { Task { await fetch(r) } }
+        if lines[r] == nil { Task { await fetch(r) } }
     }
 
     func showPending(_ id: String, steps: [[String: Any]]) {
         let key = "pending:\(id)"
-        var s = "# \(id) — queued, \(steps.count) steps (not run yet)\n\n"
-        for (i, st) in steps.enumerated() { s += String(format: "%3d  $ ", i + 1) + Terminal.command(st) + "\n" }
-        texts[key] = s
+        var s = ["# \(id) — queued, \(steps.count) steps (not run yet)", ""]
+        for (i, st) in steps.enumerated() { s.append(String(format: "%3d  $ ", i + 1) + Terminal.command(st)) }
+        lines[key] = s
         selected = key
     }
 
@@ -157,10 +168,10 @@ enum Desktop {
         let q = r.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? r
         guard let req = Desktop.request("/log?run=\(q)"),
               let (data, _) = try? await URLSession.shared.data(for: req) else {
-            texts[r] = "# could not reach the desktop to load \(r)\n"; return
+            lines[r] = ["# could not reach the desktop to load \(r)"]; return
         }
-        let s = String(data: data, encoding: .utf8) ?? ""
-        texts[r] = s.count > Self.displayCap ? "… (showing the end) …\n" + String(s.suffix(Self.displayCap)) : s
+        lines[r] = [""]
+        append(String(data: data, encoding: .utf8) ?? "", to: r)
     }
 
     /// One step spec as a shell-style command line.

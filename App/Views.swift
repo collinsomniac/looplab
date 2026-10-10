@@ -287,20 +287,25 @@ struct QueueView: View {
 
     private var terminal: some View {
         ScrollViewReader { proxy in
-            ScrollView([.vertical]) {
-                VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if term.loading { ProgressView().padding() }
-                    Text(term.shown.isEmpty ? "$ _\n\n(tap Run queue — every command and its output streams here)" : term.shown)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Color(red: 0.80, green: 0.95, blue: 0.80))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                    let ls = term.shownLines
+                    if ls.isEmpty {
+                        Text("$ _\n\n(tap Run queue — every command and its output streams here)")
+                    }
+                    ForEach(Array(ls.enumerated()), id: \.offset) { _, l in
+                        Text(l.isEmpty ? " " : l).frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     Color.clear.frame(height: 1).id("end")
                 }
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color(red: 0.80, green: 0.95, blue: 0.80))
+                .textSelection(.enabled)
+                .padding(10)
             }
             .background(Color.black)
-            .onChange(of: term.shown.count) { _, _ in if follow { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: term.shownLines.count) { _, _ in if follow { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: term.selected) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
         }
     }

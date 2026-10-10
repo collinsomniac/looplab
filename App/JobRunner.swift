@@ -139,6 +139,9 @@ final class JobRunner: @unchecked Sendable {
                 question: step["question"] as? String ?? "",
                 options: step["options"] as? [String] ?? ["yes", "no"],
                 instructions: step["instructions"] as? String).value
+        case "echo":
+            TermSink.shared.echoTokens = step["on"] as? Bool ?? true
+            return ["echoTokens": TermSink.shared.echoTokens]
         case "read_bench":
             let id = ModelHost.presets[step["model"] as? String ?? ""] ?? (step["model"] as? String ?? "")
             return ModelStore.readBench(id: id, megabytes: step["megabytes"] as? Int ?? 512,

@@ -45,12 +45,12 @@ enum URLActions {
 struct RootView: View {
     @ObservedObject private var app = AppState.shared
     var body: some View {
-        TabView {
-            ChatView().tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-            QueueView().tabItem { Label("Queue", systemImage: "list.bullet.rectangle") }
-            ModelsView().tabItem { Label("Models", systemImage: "cube.box") }
-            TestsView().tabItem { Label("Tests", systemImage: "gauge.with.dots.needle.50percent") }
-            DeviceView().tabItem { Label("Device", systemImage: "cpu") }
+        TabView(selection: $app.visibleTab) {
+            ChatView().tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }.tag("chat")
+            QueueView().tabItem { Label("Queue", systemImage: "list.bullet.rectangle") }.tag("queue")
+            ModelsView().tabItem { Label("Models", systemImage: "cube.box") }.tag("models")
+            TestsView().tabItem { Label("Tests", systemImage: "gauge.with.dots.needle.50percent") }.tag("tests")
+            DeviceView().tabItem { Label("Device", systemImage: "cpu") }.tag("device")
         }
     }
 }
