@@ -94,11 +94,14 @@ lives **inside a userspace TCP stack**, so services must be dialled through `Use
 passed as `open_connection=`; RSD service names carry a **`.shim.remote`** suffix; and
 `rsd.start_remote_service()` returns an *unconnected* connection — do not await it.
 
-### 4.3 The missing piece: signing
-Installing an IPA needs a provisioning profile tied to the user's Apple ID. `isideload`
-(`github.com/nab138/isideload`, the crate iloader uses) exposes `Sideloader::sign_app(...)` (sign only)
-and `install_app_rsd(...)`, and its `examples/minimal/src/main.rs` is a working end-to-end example.
-**This is the next thing to build** — see §8.
+### 4.3 Signing and installing (working)
+Installing needs a provisioning profile tied to the user's Apple ID. Done with **`tools/loopdeploy`**
+(Rust + `isideload`, reusing iloader's keyring session) → **`tools/pack_ipa.py`** → then
+**`tools/install_signed.py`** over the RSD tunnel. **`tools/deploy.py`** runs all of it.
+Verified: build 24 installed over Tailscale with the phone unplugged.
+Run the signer in the interactive session (keyring is unreadable from SSH), and note that Apple issues
+a **fresh 2FA code per attempt** — the signer waits for it in `2fa.txt`. Full detail, including the
+three traps, is in `docs/WIRELESS-INSTALL.md` §4.
 
 ## 5. The memory entitlement (why it matters)
 
@@ -140,9 +143,7 @@ token budget unless `enable_thinking=false`.
 
 ## 8. Immediate next steps
 
-1. **Deploy worker** (Rust, `cargo` is installed): sign with `isideload` (reuse iloader's keyring
-   session if possible to avoid 2FA), install over the RSD tunnel from §4.2, verify the installed
-   version with `installation_proxy`. Then `tools/deploy.py` watches for new releases and installs them.
+1. ~~Deploy worker~~ **done** — `tools/deploy.py` (fetch → sign → pack → install → verify).
 2. **Reboot test** for the §7 regression.
 3. **Shortcuts**: move model actions to iOS 27's long-running intent type (background GPU + Live
    Activity), then add Extract (schema → dictionary) and typed answers.

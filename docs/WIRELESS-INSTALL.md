@@ -1,7 +1,8 @@
 # Wireless installation over Tailscale — findings and plan (2026-10-10)
 
-**Status: the transport works. We can reach the phone's install service over Tailscale with no cable.**
-What remains is signing the IPA with the user's Apple ID (the deploy worker, §4).
+**Status: DONE — builds install with no cable, end to end.**
+Verified 2026-10-10: `installed: io.github.collinsomniac.looplab.FRJQU6T5U5 v0.1.24 (24)` installed over
+Tailscale with the phone unplugged. See §4 for the pipeline.
 
 ## 1. Working recipe (verified end to end)
 
@@ -72,7 +73,42 @@ installation_proxy: 76 user apps
   to the interactive logon). Workaround: a scheduled task with `/ru <user> /it`, or the Win32
   `CredEnumerateW` API, running inside the logged-in session.
 
-## 4. What remains: signing, then the deploy worker
+## 4. The deploy pipeline (working)
+
+| step | command |
+|---|---|
+| 1. build | CI publishes release `build-N` with the IPA (`build.yml`) |
+| 2. sign | `loopdeploy.exe sign <in.ipa> <out.ipa> <apple-id> <udid> https://ani.sidestore.io` |
+| 3. pack | `python pack_ipa.py <signed .app> <out.ipa>` |
+| 4. install | `python install_signed.py <ipa>` (RSD over Tailscale + `installation_proxy`) |
+| 5. verify | `install_signed.py` reads the installed version back |
+
+`tools/deploy.py` runs all five (newest release, or a path you pass).
+
+**`loopdeploy`** is a small Rust tool (`tools/loopdeploy/`), built by the `loopdeploy` CI workflow and
+published as a release asset (the desktop's own Rust install is a broken stub — 0-byte binaries).
+It uses `isideload` with **iloader's own keyring storage**, so it reuses:
+- the saved Apple ID password (keyring service `iloader`, account = the email),
+- the cached development certificate — **`machine_name` must stay `"iloader"`** or it will request a
+  new certificate instead of reusing the cached one,
+- the cached anisette state (server `https://ani.sidestore.io`).
+It signs with `increased_memory_limit: true`, which is what preserves the ~6 GB entitlement.
+
+### Three things that will bite
+- **Apple issues a new 2FA code for every login attempt**, so a code cannot be passed in advance.
+  `loopdeploy` prints `WAITING_FOR_CODE` and polls a file (`2fa.txt`, override with
+  `LOOPDEPLOY_2FA_FILE`, 10-minute limit). Write the code there while it runs. Once the session is
+  cached, later runs usually need no code.
+- **Run the signer in the interactive desktop session.** Windows Credential Manager is unreadable from
+  an SSH session (error 1312) — use `schtasks /ru <user> /it`.
+- **Packaging must keep the `Payload/` prefix and unix modes.** The first version produced
+  `LoopLab.app/…` instead of `Payload/LoopLab.app/…` and the device rejected it with
+  `Failed to get bundle ID from …/Extracted`. Python's `zipfile` also defaults entries to mode 0600 and
+  resolves symlinks, which would leave the main binary non-executable.
+
+The installed bundle id gains a team-id suffix: `io.github.collinsomniac.looplab.FRJQU6T5U5`.
+
+### Original plan (kept for context)
 
 An IPA must be signed with a provisioning profile tied to the user's Apple ID. `isideload` (the crate
 iloader uses) does exactly that, and ships a working example CLI
