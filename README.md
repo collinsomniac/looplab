@@ -16,3 +16,9 @@ On-device lab for running and instrumenting MLX language models (including loope
 
 ## Layout
 `project.yml` (XcodeGen) · `App/` Swift sources · `.github/workflows/build.yml` · `tools/ll`.
+
+## Documentation
+- [docs/STATUS.md](docs/STATUS.md) — build history, measured findings, open issues, priorities
+- [docs/LEARNING.md](docs/LEARNING.md) — plan for weight updates at inference time (session adapters)
+- [docs/OPENMINIS.md](docs/OPENMINIS.md) — forking OpenMinis as the chat front-end
+- [docs/SHORTCUTS-RESEARCH.md](docs/SHORTCUTS-RESEARCH.md) — Apple Intelligence / Shortcuts research

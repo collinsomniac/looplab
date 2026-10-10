@@ -60,7 +60,10 @@ enum DeviceProbe {
     }
 
     /// Reads the signed entitlements actually granted (from the embedded provisioning profile).
-    static func grantedEntitlements() -> [String: String] {
+    static let cachedEntitlements: [String: String] = readEntitlements()
+    static func grantedEntitlements() -> [String: String] { cachedEntitlements }
+
+    private static func readEntitlements() -> [String: String] {
         guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
               let data = try? Data(contentsOf: url),
               let text = String(data: data, encoding: .isoLatin1),
@@ -76,8 +79,10 @@ enum DeviceProbe {
         return out
     }
 
+    static let device: MTLDevice? = MTLCreateSystemDefaultDevice()
+
     static func metal() -> [String: Any] {
-        guard let dev = MTLCreateSystemDefaultDevice() else { return ["available": false] }
+        guard let dev = device else { return ["available": false] }
         var families: [String] = []
         let check: [(MTLGPUFamily, String)] = [
             (.apple7, "apple7"), (.apple8, "apple8"), (.apple9, "apple9"), (.metal3, "metal3"),

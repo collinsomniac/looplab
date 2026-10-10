@@ -76,11 +76,13 @@ final class AppState: ObservableObject {
     @Published var logLines: [String] = []
 
     private var timer: Timer?
+    private var refreshTick = 0
 
     init() {
         token = ControlServer.shared.token
         modelPresets = ModelHost.presets
         refreshLocal()
+        Library.shared.refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshLocal() }
         }
@@ -94,6 +96,9 @@ final class AppState: ObservableObject {
         thermal = DeviceProbe.thermalString()
         memoryAvailable = DeviceProbe.availableMemory()
 
+        Task { await refreshModel() }
+        refreshTick += 1
+        if refreshTick % 10 != 1 { return }   // full probe every ~15 s; thermal/memory above stay live
         let d = DeviceProbe.snapshot()
         device = d
         entitlements = (d["entitlements"] as? [String: String]) ?? [:]
@@ -105,7 +110,6 @@ final class AppState: ObservableObject {
         if !entitlements.keys.contains("com.apple.developer.kernel.increased-memory-limit"), reinstallHint.isEmpty {
             reinstallHint = "Memory limit entitlement is NOT granted (≈3.5 GB). Install this build from the desktop with iloader to raise it to ≈6 GB."
         }
-        Task { await refreshModel() }
     }
 
     func refreshModel() async {

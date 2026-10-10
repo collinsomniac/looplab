@@ -122,6 +122,7 @@ actor ModelHost {
             loadSeconds = Date().timeIntervalSince(t0)
             lastRead = ["readSeconds": readS, "diskBytes": diskBytes, "fromLibrary": true]
             state = .ready
+            Task { @MainActor in Library.shared.refresh() }
             Log.shared.add("loaded \(id) in \(String(format: "%.1f", loadSeconds ?? 0)) s, params=\(numParams ?? 0)")
             return status()
         } catch {

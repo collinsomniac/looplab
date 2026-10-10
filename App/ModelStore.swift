@@ -24,8 +24,11 @@ struct InstalledModel: Identifiable, Hashable, Sendable {
 enum ModelStore {
     static var root: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let r = docs.appendingPathComponent("Models", isDirectory: true)
+        var r = docs.appendingPathComponent("Models", isDirectory: true)
         try? FileManager.default.createDirectory(at: r, withIntermediateDirectories: true)
+        // Gigabytes of re-downloadable weights must not go into iCloud device backups.
+        var v = URLResourceValues(); v.isExcludedFromBackup = true
+        try? r.setResourceValues(v)
         return r
     }
 

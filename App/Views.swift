@@ -94,13 +94,13 @@ struct ChatView: View {
             HStack {
                 Menu {
                     Section("Installed") {
-                        ForEach(ModelStore.installed()) { m in
+                        ForEach(Library.shared.models) { m in
                             Button("\(m.name)  ·  \(m.sizeText)") { app.load(m.id) }
                         }
                     }
                     Section("Download & load") {
                         ForEach(app.modelPresets.keys.sorted(), id: \.self) { key in
-                            if !ModelStore.isInstalled(app.modelPresets[key] ?? key) {
+                            if !Library.shared.models.contains(where: { $0.id == (app.modelPresets[key] ?? key) }) {
                                 Button("\(key)") { app.load(key) }
                             }
                         }
