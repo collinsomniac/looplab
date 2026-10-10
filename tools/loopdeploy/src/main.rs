@@ -10,7 +10,9 @@
 
 use std::fs::File;
 use std::io::Read;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use anyhow::{anyhow, Result};
 use isideload::anisette::remote_v3::RemoteV3AnisetteProvider;
@@ -31,20 +33,45 @@ fn rc<T>(r: Result<T, rootcause::Report>, what: &str) -> Result<T> {
     r.map_err(|e| anyhow!("{what}: {e:?}"))
 }
 
+/// Apple sends a fresh code for every login attempt, so an agent driving this remotely cannot
+/// pass the code up front. Wait for it to appear in a file instead (default `2fa.txt` next to the
+/// working directory, override with LOOPDEPLOY_2FA_FILE). Write the code to that file and this
+/// callback picks it up within a second or two. `d` = send to devices, `r` = resend; stdin still
+/// works when run in a terminal.
 fn two_factor_callback(
     params: TwoFactorCallbackParams,
-) -> std::future::Ready<Result<TwoFactorCallbackResponse, rootcause::Report>> {
-    println!("2FA required: {params:?}");
-    println!("Enter the code (or 'd' for devices, 'r' to resend):");
-    let mut code = String::new();
-    let _ = std::io::stdin().read_line(&mut code);
-    let code = code.trim().to_string();
-    let resp = match code.as_str() {
-        "d" => TwoFactorCallbackResponse::SendToDevices,
-        "r" => TwoFactorCallbackResponse::ResendCode,
-        other => TwoFactorCallbackResponse::SubmitCode(other.to_string()),
-    };
-    std::future::ready(Ok(resp))
+) -> Pin<Box<dyn Future<Output = Result<TwoFactorCallbackResponse, rootcause::Report>> + Send>> {
+    Box::pin(async move {
+        println!("2FA required: {params:?}");
+        let path = std::env::var("LOOPDEPLOY_2FA_FILE")
+            .unwrap_or_else(|_| "2fa.txt".to_string());
+        let _ = std::fs::remove_file(&path);
+        println!("WAITING_FOR_CODE in {path} (write the code there; 10 minute limit)");
+        for _ in 0..300 {
+            if let Ok(s) = std::fs::read_to_string(&path) {
+                let code = s.trim().to_string();
+                if !code.is_empty() {
+                    let _ = std::fs::remove_file(&path);
+                    println!("code received");
+                    return Ok(match code.as_str() {
+                        "d" => TwoFactorCallbackResponse::SendToDevices,
+                        "r" => TwoFactorCallbackResponse::ResendCode,
+                        other => TwoFactorCallbackResponse::SubmitCode(other.to_string()),
+                    });
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        println!("no code appeared in {path}; falling back to stdin");
+        let mut code = String::new();
+        let _ = std::io::stdin().read_line(&mut code);
+        let code = code.trim().to_string();
+        Ok(match code.as_str() {
+            "d" => TwoFactorCallbackResponse::SendToDevices,
+            "r" => TwoFactorCallbackResponse::ResendCode,
+            other => TwoFactorCallbackResponse::SubmitCode(other.to_string()),
+        })
+    })
 }
 
 /// Repackage a signed .app into an IPA (Payload/<name>.app/...).
