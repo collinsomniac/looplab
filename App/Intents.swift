@@ -181,7 +181,7 @@ struct GenerateTextIntent: AppIntent, ForegroundContinuableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         if foreground { try await requestToContinueInForeground("Opening LoopLab to run the model in the foreground.") }
-        return try await IntentRuntime.traced("generate") {
+        let text: String = try await IntentRuntime.traced("generate") {
             let m = try await IntentRuntime.ensure(model)
             var plan = InferencePlan.make(for: m, effort: effort, maxTokens: maxTokens)
             if let temperature { plan.temperature = Float(min(2, max(0, temperature))) }
@@ -194,8 +194,9 @@ struct GenerateTextIntent: AppIntent, ForegroundContinuableIntent {
                     system: instructions, thinking: p.thinking, topP: p.topP,
                     seed: seed.map { UInt64(max(0, $0)) }).value
             }
-            return .result(value: IntentRuntime.stripThink(r["text"] as? String ?? ""))
+            return IntentRuntime.stripThink(r["text"] as? String ?? "")
         }
+        return .result(value: text)
     }
 }
 
@@ -223,7 +224,7 @@ struct DecideIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         guard options.count >= 2 else { throw LoopLabIntentError.failed("give at least two options") }
-        return try await IntentRuntime.traced("decide") {
+        let answer: String = try await IntentRuntime.traced("decide") {
             _ = try await IntentRuntime.ensure(model)
             let r = try await IntentRuntime.withTimeout(20, what: "Deciding") {
                 try await ModelHost.shared.decide(state: input, question: question, options: options).value
@@ -231,8 +232,9 @@ struct DecideIntent: AppIntent {
             let ans = r["answer"] as? String ?? fallback
             let conf = (r["probabilities"] as? [String: Double])?[ans] ?? 0
             TermSink.shared.line(String(format: "  -> %@ (%.2f)", ans, conf))
-            return .result(value: conf >= minConfidence ? ans : fallback)
+            return conf >= minConfidence ? ans : fallback
         }
+        return .result(value: answer)
     }
 }
 
@@ -253,7 +255,7 @@ struct ScoreOptionsIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         guard options.count >= 2 else { throw LoopLabIntentError.failed("give at least two options") }
-        return try await IntentRuntime.traced("score") {
+        let json: String = try await IntentRuntime.traced("score") {
             _ = try await IntentRuntime.ensure(model)
             let r = try await IntentRuntime.withTimeout(20, what: "Scoring") {
                 try await ModelHost.shared.decide(state: input, question: question, options: options).value
@@ -262,8 +264,9 @@ struct ScoreOptionsIntent: AppIntent {
             let rounded = probs.mapValues { (($0 * 1000).rounded()) / 1000 }
             let data = (try? JSONSerialization.data(withJSONObject: rounded, options: [.sortedKeys])) ?? Data("{}".utf8)
             // JSON text: Shortcuts turns it into a Dictionary with "Get Dictionary from Input".
-            return .result(value: String(data: data, encoding: .utf8) ?? "{}")
+            return String(data: data, encoding: .utf8) ?? "{}"
         }
+        return .result(value: json)
     }
 }
 
@@ -275,10 +278,10 @@ struct LoadModelIntent: AppIntent {
     static var openAppWhenRun = false
     @Parameter(title: "Model") var model: LocalModelEntity
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        try await IntentRuntime.traced("load") {
-            let m = try await IntentRuntime.ensure(model, timeout: 120)
-            return .result(value: m.name)
+        let name: String = try await IntentRuntime.traced("load") {
+            try await IntentRuntime.ensure(model, timeout: 120).name
         }
+        return .result(value: name)
     }
 }
 
