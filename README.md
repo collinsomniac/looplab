@@ -22,3 +22,4 @@ On-device lab for running and instrumenting MLX language models (including loope
 - [docs/LEARNING.md](docs/LEARNING.md) — plan for weight updates at inference time (session adapters)
 - [docs/OPENMINIS.md](docs/OPENMINIS.md) — forking OpenMinis as the chat front-end
 - [docs/SHORTCUTS-RESEARCH.md](docs/SHORTCUTS-RESEARCH.md) — Apple Intelligence / Shortcuts research
+- [docs/WIRELESS-INSTALL.md](docs/WIRELESS-INSTALL.md) — installing builds with no cable (Tailscale transport, findings, plan)
