@@ -18,6 +18,8 @@ On-device lab for running and instrumenting MLX language models (including loope
 `project.yml` (XcodeGen) · `App/` Swift sources · `.github/workflows/build.yml` · `tools/ll`.
 
 ## Documentation
+- [docs/HANDOVER.md](docs/HANDOVER.md) — **start here**: both machines, build/release, wireless install, running experiments, open questions
+- [docs/METHOD.md](docs/METHOD.md) — how findings were reached, hypotheses tested, and wrong turns
 - [docs/STATUS.md](docs/STATUS.md) — build history, measured findings, open issues, priorities
 - [docs/LEARNING.md](docs/LEARNING.md) — plan for weight updates at inference time (session adapters)
 - [docs/OPENMINIS.md](docs/OPENMINIS.md) — forking OpenMinis as the chat front-end
