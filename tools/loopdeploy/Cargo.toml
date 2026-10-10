@@ -1,0 +1,16 @@
+[package]
+name = "loopdeploy"
+version = "0.1.0"
+edition = "2021"
+description = "Sign a LoopLab IPA with the user's Apple ID (reusing iloader's keyring session) and write a signed IPA ready for wireless install"
+
+[dependencies]
+isideload = { version = "0.4.4", default-features = false, features = ["keyring-storage", "tokio-mt"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+keyring = { version = "3", features = ["windows-native"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+walkdir = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }

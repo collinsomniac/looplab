@@ -1,0 +1,52 @@
+name: loopdeploy
+
+# Builds the desktop signing worker (tools/loopdeploy) for Windows and publishes it as a release
+# asset. The desktop's own Rust install is a broken stub (0-byte binaries), so CI does the build.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/loopdeploy/**'
+      - '.github/workflows/loopdeploy.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/loopdeploy/target
+          key: loopdeploy-${{ runner.os }}-${{ hashFiles('tools/loopdeploy/Cargo.toml') }}
+
+      - name: Build
+        working-directory: tools/loopdeploy
+        run: cargo build --release --verbose
+
+      - name: Collect artifact
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item tools/loopdeploy/target/release/loopdeploy.exe dist/
+          Get-Item dist/loopdeploy.exe | Select-Object Length
+          (Get-FileHash -Algorithm SHA256 dist/loopdeploy.exe).Hash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loopdeploy-windows
+          path: dist/loopdeploy.exe
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "loopdeploy-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+          gh release create $tag dist/loopdeploy.exe --title $tag --notes "Windows signing worker (isideload + keyring). Usage: loopdeploy sign <in.ipa> <out.ipa> <apple-id> <udid> [anisette-server]"
