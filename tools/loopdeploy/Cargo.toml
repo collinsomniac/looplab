@@ -5,7 +5,8 @@ edition = "2021"
 description = "Sign a LoopLab IPA with the user's Apple ID (reusing iloader's keyring session) and write a signed IPA ready for wireless install"
 
 [dependencies]
-isideload = { version = "0.4.4", default-features = false, features = ["keyring-storage", "tokio-mt"] }
+# default features (install, keyring-storage, tokio-mt): isideload references idevice unconditionally
+isideload = "0.4.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 keyring = { version = "3", features = ["windows-native"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
