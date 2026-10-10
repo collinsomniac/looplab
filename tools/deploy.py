@@ -77,9 +77,9 @@ def sign(ipa: str) -> str:
         proc.kill()
         raise SystemExit("signing timed out")
     log = open(SIGN_LOG, encoding="utf-8", errors="replace").read()
-    if "App signed!" not in log or not os.path.exists(out):
+    if "App signed!" not in log:
         raise SystemExit(f"signing failed:\n{log[-2000:]}")
-    print("signed ok")
+    print("signed ok (packaging is done by pack_ipa.py)")
     return out
 
 

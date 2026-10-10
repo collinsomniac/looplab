@@ -8,10 +8,8 @@
 //! and anisette state are reused from the same store, so a normal run needs no prompts.
 //! `increased_memory_limit: true` is what makes the app get ~6 GB instead of ~3.25 GB.
 
-use std::fs::File;
-use std::io::Read;
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 
 use anyhow::{anyhow, Result};
@@ -22,8 +20,6 @@ use isideload::sideload::builder::MaxCertsBehavior;
 use isideload::sideload::SideloaderBuilder;
 use isideload::util::callbacks::MaxCertsCallbackBox;
 use isideload::util::keyring_storage::KeyringStorage;
-use walkdir::WalkDir;
-use zip::write::SimpleFileOptions;
 
 const STORAGE_SERVICE: &str = "iloader";
 const MACHINE_NAME: &str = "iloader"; // must match iloader's, so the cached cert identity is reused
@@ -72,33 +68,6 @@ fn two_factor_callback(
             other => TwoFactorCallbackResponse::SubmitCode(other.to_string()),
         })
     })
-}
-
-/// Repackage a signed .app into an IPA (Payload/<name>.app/...).
-fn zip_app(app_dir: &Path, out: &Path) -> Result<()> {
-    let name = app_dir
-        .file_name()
-        .ok_or_else(|| anyhow!("bad app dir"))?
-        .to_string_lossy()
-        .to_string();
-    let file = File::create(out)?;
-    let mut zw = zip::ZipWriter::new(file);
-    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let mut buf = Vec::new();
-    for entry in WalkDir::new(app_dir).min_depth(1) {
-        let entry = entry?;
-        let rel = entry.path().strip_prefix(app_dir)?;
-        let arc = format!("Payload/{name}/{}", rel.to_string_lossy().replace('\\', "/"));
-        if entry.file_type().is_dir() {
-            zw.add_directory(format!("{arc}/"), opts)?;
-        } else {
-            buf.clear();
-            File::open(entry.path())?.read_to_end(&mut buf)?;
-            std::io::Write::write_all(&mut zw, &buf)?;
-        }
-    }
-    zw.finish()?;
-    Ok(())
 }
 
 #[tokio::main]
@@ -171,8 +140,9 @@ async fn main() -> Result<()> {
     )?;
     println!("signed app: {}", signed_app.display());
 
-    zip_app(&signed_app, &out_ipa)?;
-    let size = std::fs::metadata(&out_ipa)?.len();
-    println!("wrote {} ({} bytes)", out_ipa.display(), size);
+    // Packaging happens in Python (tools/pack_ipa.py): it must preserve unix modes and symlinks and
+    // keep the Payload/ prefix, which is easier to get right there. Print the path for the caller.
+    println!("SIGNED_APP={}", signed_app.display());
+    let _ = &out_ipa; // kept for CLI compatibility
     Ok(())
 }
