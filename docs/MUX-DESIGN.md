@@ -94,6 +94,15 @@ can't name.
 - **Hook event names shared with Claude Code and Codex** (`PreToolUse`, `PostToolUse`, `Stop`, `Notification`). The `dsh` harness already runs hooks written for either. Adopting the same names means a hook written for a desktop agent can also drive our state reporting.
 - **Approval modes as a named policy** (Codex): what is possible and when to ask are separate settings. Background and scheduled runs default to deny.
 
+### Added from the final harness report
+- **Build an ACP adapter first for structured remote agents.** One adapter covers Gemini CLI, Goose,
+  Hermes, OpenCode and DeepSeek's `dsh`. Codex app-server and Claude Code (stream-json + hooks) need
+  their own adapters.
+- **One approvals inbox** across all members of all groups. Codex app-server, OpenCode and Hermes send
+  approval requests over the wire; Claude Code exposes per-agent state via `claude agents --json`.
+- **herdr's report contract** for plain terminal agents: report idle/working/blocked, a resume command,
+  and release on exit.
+
 ## 8. Open questions for the user
 
 1. Groups on the phone only, or mirrored to a host? Mirroring is needed for push while the phone sleeps.
